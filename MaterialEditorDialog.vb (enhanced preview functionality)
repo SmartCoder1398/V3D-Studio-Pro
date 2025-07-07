@@ -1,0 +1,759 @@
+' Add these imports at the top
+Imports System.Drawing.Drawing2D
+Imports System.Drawing.Imaging
+Imports System.Threading
+
+' Add these fields to the class
+Private previewMode As String = "Sphere" ' Can be "Sphere", "Cube", "Cylinder", "Torus", "Plane"
+Private previewRotation As Single = 0
+Private previewTimer As System.Windows.Forms.Timer
+Private lightPosition As New PointF(0.5F, 0.5F)
+Private previewQuality As String = "High"
+Private showWireframe As Boolean = False
+Private environmentMap As Image = Nothing
+
+' Replace the existing InitializeComponents method's preview section
+Private Sub InitializeComponents()
+    ' ... existing code until preview section ...
+
+    ' Enhanced Preview section with controls
+    Dim preview3DTab As New TabPage("3D Preview")
+    Dim previewContainer As New Panel With {.Dock = DockStyle.Fill}
+    
+    ' Preview toolbar
+    Dim previewToolbar As New ToolStrip With {
+        .Dock = DockStyle.Top,
+        .GripStyle = ToolStripGripStyle.Hidden
+    }
+    
+    ' Shape selector
+    Dim shapeLabel As New ToolStripLabel("Shape:")
+    Dim shapeCombo As New ToolStripComboBox With {
+        .DropDownStyle = ComboBoxStyle.DropDownList,
+        .Width = 80
+    }
+    shapeCombo.Items.AddRange({"Sphere", "Cube", "Cylinder", "Torus", "Plane", "Teapot"})
+    shapeCombo.SelectedIndex = 0
+    
+    ' Quality selector
+    Dim qualityLabel As New ToolStripLabel("Quality:")
+    Dim qualityCombo As New ToolStripComboBox With {
+        .DropDownStyle = ComboBoxStyle.DropDownList,
+        .Width = 60
+    }
+    qualityCombo.Items.AddRange({"Low", "Medium", "High"})
+    qualityCombo.SelectedIndex = 2
+    
+    ' Auto-rotate toggle
+    Dim rotateButton As New ToolStripButton With {
+        .Text = "Auto-Rotate",
+        .CheckOnClick = True,
+        .Checked = True
+    }
+    
+    ' Wireframe toggle
+    Dim wireframeButton As New ToolStripButton With {
+        .Text = "Wireframe",
+        .CheckOnClick = True
+    }
+    
+    ' Reset view button
+    Dim resetButton As New ToolStripButton With {
+        .Text = "Reset View"
+    }
+    
+    ' Environment map button
+    Dim envMapButton As New ToolStripButton With {
+        .Text = "Environment"
+    }
+    
+    previewToolbar.Items.AddRange({
+        shapeLabel, shapeCombo,
+        New ToolStripSeparator(),
+        qualityLabel, qualityCombo,
+        New ToolStripSeparator(),
+        rotateButton, wireframeButton,
+        New ToolStripSeparator(),
+        resetButton, envMapButton
+    })
+    
+    ' Main preview panel
+    previewPanel = New Panel With {
+        .Dock = DockStyle.Fill,
+        .BackColor = Color.FromArgb(30, 30, 30),
+        .BorderStyle = BorderStyle.None
+    }
+    
+    ' Info overlay panel
+    Dim infoPanel As New Panel With {
+        .Height = 60,
+        .Dock = DockStyle.Bottom,
+        .BackColor = Color.FromArgb(40, 40, 40)
+    }
+    
+    Dim infoLabel As New Label With {
+        .Dock = DockStyle.Fill,
+        .ForeColor = Color.White,
+        .Font = New Font("Consolas", 8),
+        .Padding = New Padding(5),
+        .Text = "Material Info"
+    }
+    infoPanel.Controls.Add(infoLabel)
+    
+    previewContainer.Controls.Add(previewPanel)
+    previewContainer.Controls.Add(infoPanel)
+    previewContainer.Controls.Add(previewToolbar)
+    
+    preview3DTab.Controls.Add(previewContainer)
+    
+    ' Setup preview timer
+    previewTimer = New System.Windows.Forms.Timer With {
+        .Interval = 33 ' ~30 FPS
+    }
+    
+    ' Event handlers
+    AddHandler shapeCombo.SelectedIndexChanged, Sub()
+        previewMode = shapeCombo.SelectedItem.ToString()
+        previewPanel.Invalidate()
+    End Sub
+    
+    AddHandler qualityCombo.SelectedIndexChanged, Sub()
+        previewQuality = qualityCombo.SelectedItem.ToString()
+        previewPanel.Invalidate()
+    End Sub
+    
+    AddHandler rotateButton.CheckedChanged, Sub()
+        If rotateButton.Checked Then
+            previewTimer.Start()
+        Else
+            previewTimer.Stop()
+        End If
+    End Sub
+    
+    AddHandler wireframeButton.CheckedChanged, Sub()
+        showWireframe = wireframeButton.Checked
+        previewPanel.Invalidate()
+    End Sub
+    
+    AddHandler resetButton.Click, Sub()
+        previewRotation = 0
+        lightPosition = New PointF(0.5F, 0.5F)
+        previewPanel.Invalidate()
+    End Sub
+    
+    AddHandler envMapButton.Click, Sub()
+        LoadEnvironmentMap()
+    End Sub
+    
+    AddHandler previewTimer.Tick, Sub()
+        previewRotation += 0.02F
+        If previewRotation > Math.PI * 2 Then previewRotation = 0
+        previewPanel.Invalidate()
+        UpdateInfoLabel(infoLabel)
+    End Sub
+    
+    ' Mouse interaction for preview
+    Dim isDragging As Boolean = False
+    Dim dragStart As Point
+    Dim lightDragging As Boolean = False
+    
+    AddHandler previewPanel.MouseDown, Sub(s, e As MouseEventArgs)
+        If e.Button = MouseButtons.Left Then
+            isDragging = True
+            dragStart = e.Location
+            previewPanel.Cursor = Cursors.Hand
+        ElseIf e.Button = MouseButtons.Right Then
+            lightDragging = True
+            dragStart = e.Location
+            previewPanel.Cursor = Cursors.Cross
+        End If
+    End Sub
+    
+    AddHandler previewPanel.MouseMove, Sub(s, e As MouseEventArgs)
+        If isDragging Then
+            Dim deltaX = (e.X - dragStart.X) * 0.01F
+            previewRotation += deltaX
+            dragStart = e.Location
+            previewPanel.Invalidate()
+        ElseIf lightDragging Then
+            lightPosition.X = CSng(e.X) / previewPanel.Width
+            lightPosition.Y = CSng(e.Y) / previewPanel.Height
+            previewPanel.Invalidate()
+        End If
+    End Sub
+    
+    AddHandler previewPanel.MouseUp, Sub(s, e As MouseEventArgs)
+        isDragging = False
+        lightDragging = False
+        previewPanel.Cursor = Cursors.Default
+    End Sub
+    
+    AddHandler previewPanel.MouseWheel, Sub(s, e As MouseEventArgs)
+        ' Zoom functionality could be added here
+    End Sub
+    
+    ' Enhanced paint handler
+    AddHandler previewPanel.Paint, AddressOf DrawEnhancedPreview
+    
+    ' Start rotation
+    If rotateButton.Checked Then
+        previewTimer.Start()
+    End If
+    
+    ' ... rest of existing code ...
+End Sub
+
+' Enhanced preview drawing method
+Private Sub DrawEnhancedPreview(sender As Object, e As PaintEventArgs)
+    Dim g = e.Graphics
+    Dim panel = CType(sender, Panel)
+    
+    ' Set quality based on setting
+    Select Case previewQuality
+        Case "High"
+            g.SmoothingMode = SmoothingMode.AntiAlias
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic
+            g.CompositingQuality = CompositingQuality.HighQuality
+        Case "Medium"
+            g.SmoothingMode = SmoothingMode.AntiAlias
+            g.InterpolationMode = InterpolationMode.Bilinear
+        Case "Low"
+            g.SmoothingMode = SmoothingMode.HighSpeed
+            g.InterpolationMode = InterpolationMode.NearestNeighbor
+    End Select
+    
+    ' Clear background
+    g.Clear(Color.FromArgb(30, 30, 30))
+    
+    If currentMaterial Is Nothing Then
+        DrawNoMaterialMessage(g, panel)
+        Return
+    End If
+    
+    ' Draw environment if available
+    If environmentMap IsNot Nothing Then
+        g.DrawImage(environmentMap, 0, 0, panel.Width, panel.Height)
+    End If
+    
+    ' Calculate preview area
+    Dim center = New PointF(panel.Width / 2.0F, panel.Height / 2.0F)
+    Dim size = Math.Min(panel.Width, panel.Height) * 0.35F
+    
+    ' Draw shadow
+    DrawShadow(g, center, size)
+    
+    ' Draw the selected shape
+    Select Case previewMode
+        Case "Sphere"
+            DrawSphere(g, center, size)
+        Case "Cube"
+            DrawCube(g, center, size)
+        Case "Cylinder"
+            DrawCylinder(g, center, size)
+        Case "Torus"
+            DrawTorus(g, center, size)
+        Case "Plane"
+            DrawPlane(g, center, size)
+        Case "Teapot"
+            DrawTeapot(g, center, size)
+    End Select
+    
+    ' Draw wireframe overlay if enabled
+    If showWireframe Then
+        DrawWireframeOverlay(g, center, size)
+    End If
+    
+    ' Draw light indicator
+    DrawLightIndicator(g, panel)
+End Sub
+
+' Sphere drawing with advanced shading
+Private Sub DrawSphere(g As Graphics, center As PointF, radius As Single)
+    Using path As New GraphicsPath()
+        path.AddEllipse(center.X - radius, center.Y - radius, radius * 2, radius * 2)
+        
+        ' Base material color
+        Using baseBrush As New PathGradientBrush(path)
+            ' Calculate light direction based on light position
+            Dim lightDir = New PointF(
+                (lightPosition.X - 0.5F) * radius,
+                (lightPosition.Y - 0.5F) * radius
+            )
+            
+            ' Apply diffuse color
+            baseBrush.CenterPoint = New PointF(
+                center.X + lightDir.X,
+                center.Y + lightDir.Y
+            )
+            
+            ' Mix colors based on material properties
+            Dim litColor = MixColors(
+                currentMaterial.DiffuseColor,
+                currentMaterial.SpecularColor,
+                currentMaterial.Shininess / 256.0F
+            )
+            
+            baseBrush.CenterColor = Color.FromArgb(
+                CInt(currentMaterial.Opacity * 255),
+                litColor
+            )
+            
+            ' Ambient color for edges
+            Dim shadowColor = MixColors(
+                currentMaterial.AmbientColor,
+                Color.Black,
+                0.5F
+            )
+            
+            baseBrush.SurroundColors = {Color.FromArgb(
+                CInt(currentMaterial.Opacity * 255),
+                shadowColor
+            )}
+            
+            baseBrush.FocusScales = New PointF(0.3F, 0.3F)
+            
+            g.FillPath(baseBrush, path)
+        End Using
+        
+        ' Specular highlight
+        If currentMaterial.Shininess > 0 Then
+            DrawSpecularHighlight(g, center, radius, lightPosition)
+        End If
+        
+        ' Reflection effect
+        If currentMaterial.Reflection > 0 Then
+            DrawReflection(g, path, center, radius)
+        End If
+        
+        ' Emissive glow
+        If currentMaterial.EmissiveColor.GetBrightness() > 0 Then
+            DrawEmissiveGlow(g, path)
+        End If
+        
+        ' Rim lighting for better depth
+        DrawRimLighting(g, center, radius)
+    End Using
+End Sub
+
+' Cube drawing with 3D perspective
+Private Sub DrawCube(g As Graphics, center As PointF, size As Single)
+    ' Calculate vertices with rotation
+    Dim vertices = CalculateCubeVertices(center, size, previewRotation)
+    Dim faces = GetCubeFaces(vertices)
+    
+    ' Sort faces by depth
+    faces.Sort(Function(a, b) b.AverageZ.CompareTo(a.AverageZ))
+    
+    ' Draw each face
+    For Each face In faces
+        If face.IsVisible Then
+            DrawCubeFace(g, face)
+        End If
+    Next
+End Sub
+
+' Helper method to draw cube face with shading
+Private Sub DrawCubeFace(g As Graphics, face As CubeFace)
+    Using path As New GraphicsPath()
+        path.AddPolygon(face.Points)
+        
+        ' Calculate face lighting
+        Dim brightness = CalculateFaceLighting(face.Normal)
+        
+        ' Apply material color with lighting
+        Dim faceColor = Color.FromArgb(
+            CInt(currentMaterial.Opacity * 255),
+            CInt(currentMaterial.DiffuseColor.R * brightness),
+            CInt(currentMaterial.DiffuseColor.G * brightness),
+            CInt(currentMaterial.DiffuseColor.B * brightness)
+        )
+        
+        Using brush As New SolidBrush(faceColor)
+            g.FillPath(brush, path)
+        End Using
+        
+        ' Draw edges for better definition
+        Using pen As New Pen(Color.FromArgb(50, Color.Black), 1)
+            g.DrawPath(pen, path)
+        End Using
+    End Using
+End Sub
+
+' Cylinder drawing
+Private Sub DrawCylinder(g As Graphics, center As PointF, size As Single)
+    Dim height = size * 1.5F
+    Dim radius = size * 0.6F
+    
+    ' Draw cylinder body
+    Dim bodyRect = New RectangleF(
+        center.X - radius,
+        center.Y - height / 2,
+        radius * 2,
+        height
+    )
+    
+    Using brush As New LinearGradientBrush(
+        bodyRect,
+        MixColors(currentMaterial.DiffuseColor, Color.White, 0.3F),
+        MixColors(currentMaterial.DiffuseColor, Color.Black, 0.3F),
+        LinearGradientMode.Horizontal
+    )
+        g.FillRectangle(brush, bodyRect)
+    End Using
+    
+    ' Draw top cap
+    Using path As New GraphicsPath()
+        path.AddEllipse(center.X - radius, center.Y - height / 2 - radius * 0.3F, 
+                       radius * 2, radius * 0.6F)
+        Using brush As New SolidBrush(currentMaterial.DiffuseColor)
+            g.FillPath(brush, path)
+        End Using
+    End Using
+    
+    ' Draw bottom cap (visible part)
+    Using path As New GraphicsPath()
+        path.AddEllipse(center.X - radius, center.Y + height / 2 - radius * 0.3F, 
+                       radius * 2, radius * 0.6F)
+        Using brush As New SolidBrush(MixColors(currentMaterial.DiffuseColor, Color.Black, 0.5F))
+            g.FillPath(brush, path)
+        End Using
+    End Using
+End Sub
+
+' Specular highlight drawing
+Private Sub DrawSpecularHighlight(g As Graphics, center As PointF, radius As Single, lightPos As PointF)
+    Dim highlightSize = radius * 0.3F * (currentMaterial.Shininess / 256.0F)
+    Dim highlightPos = New PointF(
+        center.X + (lightPos.X - 0.5F) * radius * 0.6F,
+        center.Y + (lightPos.Y - 0.5F) * radius * 0.6F
+    )
+    
+    Using path As New GraphicsPath()
+        path.AddEllipse(
+            highlightPos.X - highlightSize,
+            highlightPos.Y - highlightSize,
+            highlightSize * 2,
+            highlightSize * 2
+        )
+        
+        Using brush As New PathGradientBrush(path)
+            brush.CenterColor = Color.FromArgb(
+                CInt(200 * (currentMaterial.Shininess / 256.0F)),
+                currentMaterial.SpecularColor
+            )
+            brush.SurroundColors = {Color.Transparent}
+            brush.FocusScales = New PointF(0.3F, 0.3F)
+            
+            g.FillPath(brush, path)
+        End Using
+    End Using
+End Sub
+
+' Reflection effect
+Private Sub DrawReflection(g As Graphics, path As GraphicsPath, center As PointF, radius As Single)
+    If environmentMap IsNot Nothing Then
+        ' Simple environment mapping simulation
+        Using reflectionBrush As New TextureBrush(environmentMap)
+            reflectionBrush.Transform = New Matrix()
+            reflectionBrush.Transform.Scale(0.5F, 0.5F)
+            reflectionBrush.Transform.Translate(center.X - radius, center.Y - radius)
+            
+            g.SetClip(path)
+            g.FillPath(reflectionBrush, path)
+            g.ResetClip()
+        End Using
+    Else
+        ' Fake reflection with gradient
+        Using reflectionBrush As New LinearGradientBrush(
+            New PointF(center.X - radius, center.Y - radius),
+            New PointF(center.X + radius, center.Y + radius),
+            Color.FromArgb(CInt(50 * currentMaterial.Reflection), Color.White),
+            Color.Transparent
+        )
+            g.FillPath(reflectionBrush, path)
+        End Using
+    End If
+End Sub
+
+' Emissive glow effect
+Private Sub DrawEmissiveGlow(g As Graphics, path As GraphicsPath)
+    Using glowBrush As New PathGradientBrush(path)
+        glowBrush.CenterColor = Color.FromArgb(
+            CInt(100 * currentMaterial.EmissiveColor.GetBrightness()),
+            currentMaterial.EmissiveColor
+        )
+        glowBrush.SurroundColors = {Color.Transparent}
+        glowBrush.FocusScales = New PointF(0.8F, 0.8F)
+        
+        ' Draw multiple times for stronger glow
+        For i = 1 To 3
+            g.FillPath(glowBrush, path)
+        Next
+    End Using
+End Sub
+
+' Rim lighting for better depth perception
+Private Sub DrawRimLighting(g As Graphics, center As PointF, radius As Single)
+    Using path As New GraphicsPath()
+        path.AddEllipse(center.X - radius, center.Y - radius, radius * 2, radius * 2)
+        
+        Using pen As New Pen(Color.FromArgb(30, Color.White), 2)
+            pen.DashStyle = DashStyle.Solid
+            g.DrawPath(pen, path)
+        End Using
+    End Using
+End Sub
+
+' Shadow drawing
+Private Sub DrawShadow(g As Graphics, center As PointF, size As Single)
+    Dim shadowOffset = size * 0.1F
+    Dim shadowSize = size * 1.2F
+    
+    Using path As New GraphicsPath()
+        path.AddEllipse(
+            center.X - shadowSize,
+            center.Y + size + shadowOffset,
+            shadowSize * 2,
+            shadowSize * 0.3F
+        )
+        
+        Using brush As New PathGradientBrush(path)
+            brush.CenterColor = Color.FromArgb(80, Color.Black)
+            brush.SurroundColors = {Color.Transparent}
+            brush.FocusScales = New PointF(0.5F, 0.5F)
+            
+            g.FillPath(brush, path)
+        End Using
+    End Using
+End Sub
+
+' Light indicator
+Private Sub DrawLightIndicator(g As Graphics, panel As Panel)
+    Dim lightScreenPos = New PointF(
+        lightPosition.X * panel.Width,
+        lightPosition.Y * panel.Height
+    )
+    
+    ' Draw light icon
+    Using brush As New SolidBrush(Color.FromArgb(200, Color.Yellow))
+        g.FillEllipse(brush, lightScreenPos.X - 8, lightScreenPos.Y - 8, 16, 16)
+    End Using
+    
+    ' Draw light rays
+    Using pen As New Pen(Color.FromArgb(100, Color.Yellow), 1)
+        For angle = 0 To 360 Step 45
+            Dim rad = angle * Math.PI / 180
+            Dim x1 = lightScreenPos.X + Math.Cos(rad) * 10
+            Dim y1 = lightScreenPos.Y + Math.Sin(rad) * 10
+            Dim x2 = lightScreenPos.X + Math.Cos(rad) * 15
+            Dim y2 = lightScreenPos.Y + Math.Sin(rad) * 15
+            g.DrawLine(pen, CSng(x1), CSng(y1), CSng(x2), CSng(y2))
+        Next
+    End Using
+    
+    ' Draw light label
+    Using font As New Font("Arial", 8)
+        g.DrawString("Light", font, Brushes.White, lightScreenPos.X + 20, lightScreenPos.Y - 10)
+    End Using
+End Sub
+
+' Update info label with material properties
+Private Sub UpdateInfoLabel(label As Label)
+    If currentMaterial IsNot Nothing Then
+        label.Text = $"Material: {currentMaterial.Name} | " &
+                    $"Opacity: {currentMaterial.Opacity:P0} | " &
+                    $"Shininess: {currentMaterial.Shininess:F0} | " &
+                    $"Reflection: {currentMaterial.Reflection:P0} | " &
+                    $"Rotation: {(previewRotation * 180 / Math.PI):F0}°"
+    End If
+End Sub
+
+' Helper method to mix colors
+Private Function MixColors(color1 As Color, color2 As Color, ratio As Single) As Color
+    ratio = Math.Max(0, Math.Min(1, ratio))
+    Return Color.FromArgb(
+        CInt(color1.R * (1 - ratio) + color2.R * ratio),
+        CInt(color1.G * (1 - ratio) + color2.G * ratio),
+        CInt(color1.B * (1 - ratio) + color2.B * ratio)
+    )
+End Function
+
+' Load environment map for reflections
+Private Sub LoadEnvironmentMap()
+    Using openDialog As New OpenFileDialog()
+        openDialog.Filter = "Image Files|*.jpg;*.png;*.bmp;*.hdr|All Files|*.*"
+        openDialog.Title = "Select Environment Map"
+        
+        If openDialog.ShowDialog() = DialogResult.OK Then
+            Try
+                environmentMap?.Dispose()
+                environmentMap = Image.FromFile(openDialog.FileName)
+                previewPanel.Invalidate()
+            Catch ex As Exception
+                MessageBox.Show($"Error loading environment map: {ex.Message}", 
+                              "Error", MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+        End If
+    End Using
+End Sub
+
+' Cube face structure
+Private Structure CubeFace
+    Public Points() As PointF
+    Public Normal As Vector3
+    Public AverageZ As Single
+    Public IsVisible As Boolean
+End Structure
+
+' Calculate cube vertices with rotation
+Private Function CalculateCubeVertices(center As PointF, size As Single, rotation As Single) As PointF()
+    ' Define 8 vertices of a cube
+    Dim halfSize = size / 2
+    Dim vertices(7) As PointF
+    
+    ' Define 3D positions
+    Dim positions3D = {
+        New Vector3(-halfSize, -halfSize, -halfSize),
+        New Vector3(halfSize, -halfSize, -halfSize),
+        New Vector3(halfSize, halfSize, -halfSize),
+        New Vector3(-halfSize, halfSize, -halfSize),
+        New Vector3(-halfSize, -halfSize, halfSize),
+        New Vector3(halfSize, -halfSize, halfSize),
+        New Vector3(halfSize, halfSize, halfSize),
+        New Vector3(-halfSize, halfSize, halfSize)
+    }
+    
+    ' Apply rotation and projection
+    For i = 0 To 7
+        ' Rotate around Y axis
+        Dim x = positions3D(i).X * Math.Cos(rotation) - positions3D(i).Z * Math.Sin(rotation)
+        Dim z = positions3D(i).X * Math.Sin(rotation) + positions3D(i).Z * Math.Cos(rotation)
+        Dim y = positions3D(i).Y
+        
+        ' Simple perspective projection
+        Dim perspective = 1.0F / (1.0F + z * 0.001F)
+        vertices(i) = New PointF(
+            center.X + CSng(x * perspective),
+            center.Y + CSng(y * perspective)
+        )
+    Next
+    
+    Return vertices
+End Function
+
+' Get cube faces with visibility culling
+Private Function GetCubeFaces(vertices() As PointF) As List(Of CubeFace)
+    Dim faces As New List(Of CubeFace)
+    
+    ' Define face indices and normals
+    Dim faceData = {
+        ({0, 1, 2, 3}, New Vector3(0, 0, -1)), ' Front
+        ({5, 4, 7, 6}, New Vector3(0, 0, 1)),  ' Back
+        ({4, 0, 3, 7}, New Vector3(-1, 0, 0)), ' Left
+        ({1, 5, 6, 2}, New Vector3(1, 0, 0)),  ' Right
+        ({3, 2, 6, 7}, New Vector3(0, 1, 0)),  ' Top
+        ({4, 5, 1, 0}, New Vector3(0, -1, 0))  ' Bottom
+    }
+    
+    For Each faceInfo In faceData
+        Dim face As New CubeFace
+        face.Points = {
+            vertices(faceInfo.Item1(0)),
+            vertices(faceInfo.Item1(1)),
+            vertices(faceInfo.Item1(2)),
+            vertices(faceInfo.Item1(3))
+        }
+        face.Normal = faceInfo.Item2
+        
+        ' Calculate average Z for sorting
+        face.AverageZ = (face.Points(0).Y + face.Points(1).Y + 
+                        face.Points(2).Y + face.Points(3).Y) / 4
+        
+        ' Simple backface culling
+        face.IsVisible = CalculateVisibility(face.Points)
+        
+        If face.IsVisible Then
+            faces.Add(face)
+        End If
+    Next
+    
+    Return faces
+End Function
+
+' Calculate face visibility
+Private Function CalculateVisibility(points() As PointF) As Boolean
+    ' Calculate face normal using cross product
+    Dim v1 = New PointF(points(1).X - points(0).X, points(1).Y - points(0).Y)
+    Dim v2 = New PointF(points(2).X - points(0).X, points(2).Y - points(0).Y)
+    
+    ' 2D cross product
+    Dim cross = v1.X * v2.Y - v1.Y * v2.X
+    
+    ' Face is visible if normal points towards viewer
+    Return cross > 0
+End Function
+
+' Calculate face lighting based on normal
+Private Function CalculateFaceLighting(normal As Vector3) As Single
+    ' Simple directional lighting
+    Dim lightDir = New Vector3(lightPosition.X - 0.5F, lightPosition.Y - 0.5F, -1)
+    lightDir.Normalize()
+    
+    ' Calculate dot product
+    Dim dot = Math.Max(0, Vector3.Dot(normal, lightDir))
+    
+    ' Add ambient light
+    Return 0.3F + 0.7F * dot
+End Function
+
+' Draw "No Material" message
+Private Sub DrawNoMaterialMessage(g As Graphics, panel As Panel)
+    Using font As New Font("Arial", 12)
+        Dim text = "No Material Selected"
+        Dim textSize = g.MeasureString(text, font)
+        
+        g.DrawString(text, font, Brushes.Gray,
+                    (panel.Width - textSize.Width) / 2,
+                    (panel.Height - textSize.Height) / 2)
+    End Using
+End Sub
+
+' Wireframe overlay for debugging
+Private Sub DrawWireframeOverlay(g As Graphics, center As PointF, size As Single)
+    Using pen As New Pen(Color.FromArgb(100, Color.Lime), 1) With {
+        .DashStyle = DashStyle.Dot
+    }
+        Select Case previewMode
+            Case "Sphere"
+                ' Draw latitude/longitude lines
+                For i = 0 To 360 Step 30
+                    Dim angle = i * Math.PI / 180
+                    ' Latitude lines
+                    g.DrawEllipse(pen, center.X - size, center.Y - size * Math.Sin(angle), 
+                                 size * 2, size * 2 * Math.Sin(angle))
+                Next
+            Case "Cube"
+                ' Draw cube edges
+                Dim vertices = CalculateCubeVertices(center, size, previewRotation)
+                Dim edges = {
+                    {0, 1}, {1, 2}, {2, 3}, {3, 0}, ' Front
+                    {4, 5}, {5, 6}, {6, 7}, {7, 4}, ' Back
+                    {0, 4}, {1, 5}, {2, 6}, {3, 7}  ' Connecting
+                }
+                
+                For Each edge In edges
+                    g.DrawLine(pen, vertices(edge(0)), vertices(edge(1)))
+                Next
+        End Select
+    End Using
+End Sub
+
+' Clean up resources
+Protected Overrides Sub Dispose(disposing As Boolean)
+    If disposing Then
+        previewTimer?.Stop()
+        previewTimer?.Dispose()
+        environmentMap?.Dispose()
+    End If
+    MyBase.Dispose(disposing)
+End Sub

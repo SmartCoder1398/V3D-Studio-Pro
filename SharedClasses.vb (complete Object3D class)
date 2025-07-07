@@ -1,0 +1,40 @@
+' Complete Object3D class with material support
+Public Class Object3D
+    Public Property Name As String
+    Public Property Type As String
+    Public Property Position As SharpDX.Vector3
+    Public Property Rotation As SharpDX.Vector3
+    Public Property Scale As SharpDX.Vector3
+    Public Property IsSelected As Boolean
+    Public Property Color As SharpDX.Color4 = New SharpDX.Color4(0.8F, 0.8F, 0.8F, 1.0F)
+    Public Property MaterialName As String = "Default"
+    
+    ' Additional properties for rendering
+    Public Property Visible As Boolean = True
+    Public Property CastShadows As Boolean = True
+    Public Property ReceiveShadows As Boolean = True
+    Public Property WireframeColor As SharpDX.Color4 = New SharpDX.Color4(1.0F, 1.0F, 1.0F, 1.0F)
+    
+    Public Sub New()
+        Position = New SharpDX.Vector3(0, 0, 0)
+        Rotation = New SharpDX.Vector3(0, 0, 0)
+        Scale = New SharpDX.Vector3(1, 1, 1)
+    End Sub
+    
+    Public Function Clone() As Object3D
+        Return New Object3D() With {
+            .Name = Me.Name & "_Copy",
+            .Type = Me.Type,
+            .Position = Me.Position,
+            .Rotation = Me.Rotation,
+            .Scale = Me.Scale,
+            .IsSelected = False,
+            .Color = Me.Color,
+            .MaterialName = Me.MaterialName,
+            .Visible = Me.Visible,
+            .CastShadows = Me.CastShadows,
+            .ReceiveShadows = Me.ReceiveShadows,
+            .WireframeColor = Me.WireframeColor
+        }
+    End Function
+End Class

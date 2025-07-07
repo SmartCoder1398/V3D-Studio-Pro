@@ -1,0 +1,15 @@
+' Add these methods to MaterialEditorDialog class
+
+Public Sub LoadExistingMaterials(existingMaterials As Dictionary(Of String, Material))
+    materials.Clear()
+    For Each kvp In existingMaterials
+        materials.Add(kvp.Key, kvp.Value.Clone())
+    Next
+    UpdateMaterialList()
+End Sub
+
+Public Sub SelectMaterial(materialName As String)
+    If materials.ContainsKey(materialName) Then
+        materialListBox.SelectedItem = materialName
+    End If
+End Sub

@@ -1,0 +1,8 @@
+' Add material property to Object3D class
+Public Class Object3D
+    ' ... existing properties ...
+    
+    Public Property MaterialName As String = "Default"
+    
+    ' ... rest of the class ...
+End Class

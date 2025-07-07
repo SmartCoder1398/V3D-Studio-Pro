@@ -1,0 +1,376 @@
+' Add these imports at the top
+Imports SharpDX
+Imports SharpDX.Mathematics.Interop
+Imports System.IO
+Imports System.Xml.Serialization
+
+' Add these fields to Form1
+Private topViewport As ViewportPanel
+Private frontViewport As ViewportPanel
+Private leftViewport As ViewportPanel
+Private perspectiveViewport As ViewportPanel
+Private activeViewport As ViewportPanel
+Private materialLibrary As New Dictionary(Of String, Material)
+Private defaultMaterial As Material
+
+' Add this to Form1_Load
+Private Sub Form1_Load(sender As Object, e As EventArgs) Handles MyBase.Load
+    ' ... existing code ...
+    
+    ' Initialize default material
+    InitializeMaterials()
+    
+    ' Create context menu for viewports
+    CreateViewportContextMenu()
+End Sub
+
+' Add these new methods to Form1
+Private Sub InitializeMaterials()
+    ' Create default material
+    defaultMaterial = New Material("Default") With {
+        .DiffuseColor = Color.Gray,
+        .AmbientColor = Color.FromArgb(64, 64, 64),
+        .SpecularColor = Color.White,
+        .Shininess = 32.0F
+    }
+    materialLibrary.Add("Default", defaultMaterial)
+    
+    ' Load saved materials
+    LoadMaterialLibrary()
+End Sub
+
+Private Sub LoadMaterialLibrary()
+    Dim materialPath = Path.Combine(Application.StartupPath, "Materials")
+    If Directory.Exists(materialPath) Then
+        Try
+            Dim libFile = Path.Combine(materialPath, "library.matlib")
+            If File.Exists(libFile) Then
+                Using reader As New StreamReader(libFile)
+                    Dim serializer As New XmlSerializer(GetType(MaterialLibrary))
+                    Dim library = CType(serializer.Deserialize(reader), MaterialLibrary)
+                    For Each mat In library.Materials
+                        If Not materialLibrary.ContainsKey(mat.Name) Then
+                            materialLibrary.Add(mat.Name, mat)
+                        End If
+                    Next
+                End Using
+            End If
+        Catch ex As Exception
+            Debug.WriteLine($"Error loading material library: {ex.Message}")
+        End Try
+    End If
+End Sub
+
+' Update Object3D class
+Public Class Object3D
+    Public Property Name As String
+    Public Property Type As String
+    Public Property Position As Vector3
+    Public Property Rotation As Vector3
+    Public Property Scale As Vector3
+    Public Property IsSelected As Boolean
+    Public Property Color As Color4 = New Color4(0.8F, 0.8F, 0.8F, 1.0F)
+    Public Property MaterialName As String
+    
+    Public Sub New()
+        Position = New Vector3(0, 0, 0)
+        Rotation = New Vector3(0, 0, 0)
+        Scale = New Vector3(1, 1, 1)
+    End Sub
+End Class
+
+' Update InitializeViewports method
+Private Sub InitializeViewports()
+    ' Remove existing controls
+    TopViewPanel.Controls.Clear()
+    FrontViewPanel.Controls.Clear()
+    LeftViewPanel.Controls.Clear()
+    PerspectiveViewPanel.Controls.Clear()
+    
+    ' Create SharpDX viewports
+    topViewport = New ViewportPanel("Top")
+    topViewport.Dock = DockStyle.Fill
+    TopViewPanel.Controls.Add(topViewport)
+    
+    frontViewport = New ViewportPanel("Front")
+    frontViewport.Dock = DockStyle.Fill
+    FrontViewPanel.Controls.Add(frontViewport)
+    
+    leftViewport = New ViewportPanel("Left")
+    leftViewport.Dock = DockStyle.Fill
+    LeftViewPanel.Controls.Add(leftViewport)
+    
+    perspectiveViewport = New ViewportPanel("Perspective")
+    perspectiveViewport.Dock = DockStyle.Fill
+    PerspectiveViewPanel.Controls.Add(perspectiveViewport)
+    
+    ' Set perspective as active
+    activeViewport = perspectiveViewport
+    perspectiveViewport.SetActive(True)
+    
+    ' Wire up click events
+    AddHandler topViewport.Click, Sub() SetActiveViewport("Top")
+    AddHandler frontViewport.Click, Sub() SetActiveViewport("Front")
+    AddHandler leftViewport.Click, Sub() SetActiveViewport("Left")
+    AddHandler perspectiveViewport.Click, Sub() SetActiveViewport("Perspective")
+End Sub
+
+' Update UpdateViewports method
+Private Sub UpdateViewports()
+    topViewport?.UpdateObjects(sceneObjects)
+    frontViewport?.UpdateObjects(sceneObjects)
+    leftViewport?.UpdateObjects(sceneObjects)
+    perspectiveViewport?.UpdateObjects(sceneObjects)
+End Sub
+
+' Update ShowGridToolStripMenuItem_Click
+Private Sub ShowGridToolStripMenuItem_Click(sender As Object, e As EventArgs) Handles ShowGridToolStripMenuItem.Click
+    showGrid = ShowGridToolStripMenuItem.Checked
+    GridToolStripButton.Checked = showGrid
+    
+    topViewport?.SetShowGrid(showGrid)
+    frontViewport?.SetShowGrid(showGrid)
+    leftViewport?.SetShowGrid(showGrid)
+    perspectiveViewport?.SetShowGrid(showGrid)
+End Sub
+
+' Update GridsToolStripMenuItem_Click to use the new settings
+Private Sub GridsToolStripMenuItem_Click(sender As Object, e As EventArgs) Handles GridsToolStripMenuItem.Click
+    Using gridDialog As New GridSettingsDialog()
+        If gridDialog.ShowDialog() = DialogResult.OK Then
+            Dim settings As New GridSettings() With {
+                .GridSpacing = gridDialog.GridSpacing,
+                .MajorLineInterval = gridDialog.MajorLineInterval,
+                .GridColor = Color.FromArgb(gridDialog.GridColor.ToArgb()),
+                .ShowGrid = gridDialog.ShowGrid
+            }
+            
+            topViewport?.UpdateGridSettings(settings)
+            frontViewport?.UpdateGridSettings(settings)
+            leftViewport?.UpdateGridSettings(settings)
+            perspectiveViewport?.UpdateGridSettings(settings)
+        End If
+    End Using
+End Sub
+
+' Add selection handling in CreatePrimitive
+Private Sub CreatePrimitive(primitiveType As String)
+    ' Clear previous selection
+    For Each obj In sceneObjects
+        obj.IsSelected = False
+    Next
+    selectedObjects.Clear()
+    
+    Dim newObject As New Object3D()
+    newObject.Name = $"{primitiveType}{sceneObjects.Count + 1}"
+    newObject.Type = primitiveType
+    newObject.Position = New Vector3(0, 0, 0)
+    newObject.Rotation = New Vector3(0, 0, 0)
+    newObject.Scale = New Vector3(1, 1, 1)
+    newObject.MaterialName = "Default"  ' Assign default material
+    newObject.IsSelected = True
+
+    sceneObjects.Add(newObject)
+    selectedObjects.Add(newObject)
+    
+    UpdateViewports()
+    UpdateStatusBar($"Created {newObject.Name} with Default material")
+End Sub
+
+' Update the MaterialEditorToolStripMenuItem_Click handler
+Private Sub MaterialEditorToolStripMenuItem_Click(sender As Object, e As EventArgs) Handles MaterialEditorToolStripMenuItem.Click
+    Using matEditor As New MaterialEditorDialog()
+        ' Pass current material library to editor
+        If materialLibrary.Count > 0 Then
+            matEditor.LoadExistingMaterials(materialLibrary)
+        End If
+        
+        ' If objects are selected, highlight their current material
+        If selectedObjects.Count > 0 Then
+            Dim firstMaterial = selectedObjects(0).MaterialName
+            matEditor.SelectMaterial(firstMaterial)
+        End If
+        
+        If matEditor.ShowDialog() = DialogResult.OK Then
+            ' Update the material library
+            materialLibrary = matEditor.MaterialLibrary
+            
+            ' Apply selected material to selected objects
+            If matEditor.SelectedMaterial IsNot Nothing AndAlso selectedObjects.Count > 0 Then
+                ApplyMaterialToSelected(matEditor.SelectedMaterial.Name)
+            End If
+            
+            ' Save the updated library
+            SaveMaterialLibrary()
+        End If
+    End Using
+End Sub
+
+' New method to apply material to selected objects
+Private Sub ApplyMaterialToSelected(materialName As String)
+    If Not materialLibrary.ContainsKey(materialName) Then
+        MessageBox.Show($"Material '{materialName}' not found in library.", "Material Error", 
+                       MessageBoxButtons.OK, MessageBoxIcon.Warning)
+        Return
+    End If
+    
+    Dim appliedCount = 0
+    For Each obj In selectedObjects
+        obj.MaterialName = materialName
+        appliedCount += 1
+    Next
+    
+    UpdateViewports()
+    UpdateStatusBar($"Applied material '{materialName}' to {appliedCount} objects")
+End Sub
+
+' Save material library
+Private Sub SaveMaterialLibrary()
+    Try
+        Dim materialPath = Path.Combine(Application.StartupPath, "Materials")
+        If Not Directory.Exists(materialPath) Then
+            Directory.CreateDirectory(materialPath)
+        End If
+        
+        Dim libFile = Path.Combine(materialPath, "library.matlib")
+        Dim library As New MaterialLibrary() With {
+            .Materials = materialLibrary.Values.ToList()
+        }
+        
+        Using writer As New StreamWriter(libFile)
+            Dim serializer As New XmlSerializer(GetType(MaterialLibrary))
+            serializer.Serialize(writer, library)
+        End Using
+    Catch ex As Exception
+        Debug.WriteLine($"Error saving material library: {ex.Message}")
+    End Try
+End Sub
+
+' Add context menu for quick material assignment
+Private Sub CreateViewportContextMenu()
+    Dim contextMenu As New ContextMenuStrip()
+    
+    ' Add "Assign Material" submenu
+    Dim assignMaterialMenu As New ToolStripMenuItem("Assign Material")
+    
+    ' Add current materials to submenu
+    For Each kvp In materialLibrary.OrderBy(Function(k) k.Key)
+        Dim matItem As New ToolStripMenuItem(kvp.Key)
+        AddHandler matItem.Click, Sub(s, e) ApplyMaterialToSelected(kvp.Key)
+        assignMaterialMenu.DropDownItems.Add(matItem)
+    Next
+    
+    ' Add separator and "Edit Materials..." option
+    assignMaterialMenu.DropDownItems.Add(New ToolStripSeparator())
+    Dim editMaterialsItem As New ToolStripMenuItem("Edit Materials...")
+    AddHandler editMaterialsItem.Click, AddressOf MaterialEditorToolStripMenuItem_Click
+    assignMaterialMenu.DropDownItems.Add(editMaterialsItem)
+    
+    contextMenu.Items.Add(assignMaterialMenu)
+    
+    ' Assign context menu to viewports
+    TopViewPanel.ContextMenuStrip = contextMenu
+    FrontViewPanel.ContextMenuStrip = contextMenu
+    LeftViewPanel.ContextMenuStrip = contextMenu
+    PerspectiveViewPanel.ContextMenuStrip = contextMenu
+End Sub
+
+' Add material display to status bar
+Private Sub UpdateObjectInfo()
+    If selectedObjects.Count = 1 Then
+        Dim obj = selectedObjects(0)
+        Dim matName = If(materialLibrary.ContainsKey(obj.MaterialName), obj.MaterialName, "Unknown")
+        UpdateStatusBar($"Selected: {obj.Name} | Material: {matName}")
+    ElseIf selectedObjects.Count > 1 Then
+        ' Check if all selected objects have the same material
+        Dim firstMat = selectedObjects(0).MaterialName
+        Dim sameMaterial = selectedObjects.All(Function(o) o.MaterialName = firstMat)
+        
+        If sameMaterial Then
+            UpdateStatusBar($"Selected: {selectedObjects.Count} objects | Material: {firstMat}")
+        Else
+            UpdateStatusBar($"Selected: {selectedObjects.Count} objects | Materials: Multiple")
+        End If
+    End If
+End Sub
+
+' Add keyboard shortcut for material editor
+Protected Overrides Function ProcessCmdKey(ByRef msg As Message, keyData As Keys) As Boolean
+    Select Case keyData
+        Case Keys.M  ' M key opens material editor
+            If selectedObjects.Count > 0 Then
+                MaterialEditorToolStripMenuItem_Click(Nothing, Nothing)
+                Return True
+            End If
+        Case Keys.Control Or Keys.M  ' Ctrl+M for quick material assignment
+            ShowQuickMaterialMenu()
+            Return True
+    End Select
+    
+    Return MyBase.ProcessCmdKey(msg, keyData)
+End Function
+
+' Quick material assignment menu
+Private Sub ShowQuickMaterialMenu()
+    If selectedObjects.Count = 0 Then
+        MessageBox.Show("No objects selected.", "Material Assignment", 
+                       MessageBoxButtons.OK, MessageBoxIcon.Information)
+        Return
+    End If
+    
+    Using quickForm As New Form()
+        quickForm.Text = "Quick Material Assignment"
+        quickForm.Size = New Size(300, 400)
+        quickForm.StartPosition = FormStartPosition.CenterParent
+        
+        Dim listBox As New ListBox() With {
+            .Dock = DockStyle.Fill,
+            .Font = New Font("Segoe UI", 10)
+        }
+        
+        For Each mat In materialLibrary.Keys.OrderBy(Function(k) k)
+            listBox.Items.Add(mat)
+        Next
+        
+        Dim btnPanel As New Panel() With {
+            .Height = 40,
+            .Dock = DockStyle.Bottom
+        }
+        
+        Dim btnApply As New Button() With {
+            .Text = "Apply",
+            .Location = New Point(110, 8),
+            .Size = New Size(80, 25)
+        }
+        
+        Dim btnCancel As New Button() With {
+            .Text = "Cancel",
+            .Location = New Point(195, 8),
+            .Size = New Size(80, 25)
+        }
+        
+        AddHandler btnApply.Click, Sub()
+            If listBox.SelectedItem IsNot Nothing Then
+                ApplyMaterialToSelected(listBox.SelectedItem.ToString())
+                quickForm.DialogResult = DialogResult.OK
+            End If
+        End Sub
+        
+        AddHandler btnCancel.Click, Sub()
+            quickForm.DialogResult = DialogResult.Cancel
+        End Sub
+        
+        AddHandler listBox.DoubleClick, Sub()
+            If listBox.SelectedItem IsNot Nothing Then
+                ApplyMaterialToSelected(listBox.SelectedItem.ToString())
+                quickForm.DialogResult = DialogResult.OK
+            End If
+        End Sub
+        
+        btnPanel.Controls.AddRange({btnApply, btnCancel})
+        quickForm.Controls.Add(listBox)
+        quickForm.Controls.Add(btnPanel)
+        
+        quickForm.ShowDialog(Me)
+    End Using
+End Sub

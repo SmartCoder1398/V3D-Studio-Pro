@@ -1,0 +1,470 @@
+' Replace the existing LoadDefaultMaterials method with this enhanced version
+Private Sub LoadDefaultMaterials()
+    ' Create default materials
+    Dim defaultMat = New Material("Default") With {
+        .DiffuseColor = Color.Gray,
+        .AmbientColor = Color.FromArgb(64, 64, 64),
+        .SpecularColor = Color.White,
+        .Shininess = 32.0F
+    }
+
+    Dim metalMat = New Material("Metal") With {
+        .DiffuseColor = Color.Silver,
+        .AmbientColor = Color.FromArgb(40, 40, 40),
+        .SpecularColor = Color.White,
+        .Shininess = 128.0F,
+        .Reflection = 0.8F
+    }
+
+    Dim glassMat = New Material("Glass") With {
+        .DiffuseColor = Color.FromArgb(100, 200, 200, 255),
+        .SpecularColor = Color.White,
+        .Shininess = 256.0F,
+        .Opacity = 0.3F,
+        .Reflection = 0.9F,
+        .Refraction = 1.5F
+    }
+
+    Dim woodMat = New Material("Wood") With {
+        .DiffuseColor = Color.SaddleBrown,
+        .AmbientColor = Color.FromArgb(40, 20, 10),
+        .SpecularColor = Color.FromArgb(100, 100, 100),
+        .Shininess = 16.0F
+    }
+
+    Dim plasticMat = New Material("Plastic") With {
+        .DiffuseColor = Color.Red,
+        .AmbientColor = Color.FromArgb(50, 0, 0),
+        .SpecularColor = Color.FromArgb(200, 200, 200),
+        .Shininess = 64.0F
+    }
+
+    ' Add to dictionary
+    materials.Add("Default", defaultMat)
+    materials.Add("Metal", metalMat)
+    materials.Add("Glass", glassMat)
+    materials.Add("Wood", woodMat)
+    materials.Add("Plastic", plasticMat)
+
+    ' Update list
+    UpdateMaterialList()
+
+    ' Load saved materials from disk
+    LoadMaterialLibrary()
+End Sub
+
+' Add this new method to update the material list
+Private Sub UpdateMaterialList()
+    materialListBox.Items.Clear()
+    For Each mat In materials.Keys.OrderBy(Function(k) k)
+        materialListBox.Items.Add(mat)
+    Next
+End Sub
+
+' Replace the CreateNewMaterial method
+Private Sub CreateNewMaterial(sender As Object, e As EventArgs)
+    Dim name As String = InputBox("Enter material name:", "New Material", $"Material{materials.Count + 1}")
+    If Not String.IsNullOrEmpty(name) AndAlso Not materials.ContainsKey(name) Then
+        Dim newMat = New Material(name)
+        materials.Add(name, newMat)
+        UpdateMaterialList()
+        materialListBox.SelectedItem = name
+    ElseIf materials.ContainsKey(name) Then
+        MessageBox.Show("A material with this name already exists.", "Duplicate Name", 
+                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+    End If
+End Sub
+
+' Replace the DeleteMaterial method
+Private Sub DeleteMaterial(sender As Object, e As EventArgs)
+    If materialListBox.SelectedItem IsNot Nothing Then
+        Dim selectedName = materialListBox.SelectedItem.ToString()
+        If selectedName <> "Default" Then ' Prevent deleting default material
+            If MessageBox.Show($"Delete material '{selectedName}'?", "Confirm Delete", 
+                             MessageBoxButtons.YesNo, MessageBoxIcon.Question) = DialogResult.Yes Then
+                materials.Remove(selectedName)
+                UpdateMaterialList()
+                If materialListBox.Items.Count > 0 Then
+                    materialListBox.SelectedIndex = 0
+                End If
+            End If
+        Else
+            MessageBox.Show("Cannot delete the default material.", "Delete Material", 
+                          MessageBoxButtons.OK, MessageBoxIcon.Information)
+        End If
+    End If
+End Sub
+
+' Replace the CloneMaterial method
+Private Sub CloneMaterial(sender As Object, e As EventArgs)
+    If currentMaterial IsNot Nothing Then
+        Dim newName = InputBox($"Enter name for cloned material:", "Clone Material", 
+                             $"{currentMaterial.Name}_Copy")
+        If Not String.IsNullOrEmpty(newName) AndAlso Not materials.ContainsKey(newName) Then
+            Dim clonedMat = currentMaterial.Clone()
+            clonedMat.Name = newName
+            materials.Add(newName, clonedMat)
+            UpdateMaterialList()
+            materialListBox.SelectedItem = newName
+        End If
+    End If
+End Sub
+
+' Replace the SaveMaterial method with this enhanced version
+Private Sub SaveMaterial(sender As Object, e As EventArgs)
+    If currentMaterial IsNot Nothing Then
+        Using saveDialog As New SaveFileDialog()
+            saveDialog.Filter = "Material Files (*.mat)|*.mat|JSON Files (*.json)|*.json"
+            saveDialog.FileName = currentMaterial.Name
+            saveDialog.InitialDirectory = materialLibraryPath
+            
+            If saveDialog.ShowDialog() = DialogResult.OK Then
+                Try
+                    If Not Directory.Exists(Path.GetDirectoryName(saveDialog.FileName)) Then
+                        Directory.CreateDirectory(Path.GetDirectoryName(saveDialog.FileName))
+                    End If
+                    
+                    If saveDialog.FilterIndex = 1 Then
+                        ' Save as binary
+                        SaveMaterialBinary(currentMaterial, saveDialog.FileName)
+                    Else
+                        ' Save as JSON
+                        SaveMaterialJson(currentMaterial, saveDialog.FileName)
+                    End If
+                    
+                    MessageBox.Show($"Material saved successfully.", "Save Material", 
+                                  MessageBoxButtons.OK, MessageBoxIcon.Information)
+                Catch ex As Exception
+                    MessageBox.Show($"Error saving material: {ex.Message}", "Save Error", 
+                                  MessageBoxButtons.OK, MessageBoxIcon.Error)
+                End Try
+            End If
+        End Using
+    End If
+End Sub
+
+' Replace the LoadMaterial method
+Private Sub LoadMaterial(sender As Object, e As EventArgs)
+    Using openDialog As New OpenFileDialog()
+        openDialog.Filter = "Material Files (*.mat)|*.mat|JSON Files (*.json)|*.json|All Files (*.*)|*.*"
+        openDialog.InitialDirectory = materialLibraryPath
+        
+        If openDialog.ShowDialog() = DialogResult.OK Then
+            Try
+                Dim loadedMat As Material = Nothing
+                
+                If Path.GetExtension(openDialog.FileName).ToLower() = ".json" Then
+                    loadedMat = LoadMaterialJson(openDialog.FileName)
+                Else
+                    loadedMat = LoadMaterialBinary(openDialog.FileName)
+                End If
+                
+                If loadedMat IsNot Nothing Then
+                    ' Check for duplicate names
+                    Dim originalName = loadedMat.Name
+                    Dim counter = 1
+                    While materials.ContainsKey(loadedMat.Name)
+                        loadedMat.Name = $"{originalName}_{counter}"
+                        counter += 1
+                    End While
+                    
+                    materials.Add(loadedMat.Name, loadedMat)
+                    UpdateMaterialList()
+                    materialListBox.SelectedItem = loadedMat.Name
+                End If
+            Catch ex As Exception
+                MessageBox.Show($"Error loading material: {ex.Message}", "Load Error", 
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+        End If
+    End Using
+End Sub
+
+' Replace the ExportMaterialLibrary method
+Private Sub ExportMaterialLibrary(sender As Object, e As EventArgs)
+    Using saveDialog As New SaveFileDialog()
+        saveDialog.Filter = "Material Library (*.matlib)|*.matlib|JSON Library (*.json)|*.json"
+        saveDialog.FileName = "MaterialLibrary"
+        
+        If saveDialog.ShowDialog() = DialogResult.OK Then
+            Try
+                Dim libraryData As New MaterialLibrary() With {
+                    .Materials = materials.Values.ToList(),
+                    .Version = "1.0",
+                    .CreatedDate = DateTime.Now
+                }
+                
+                If saveDialog.FilterIndex = 2 Then
+                    ' Save as JSON
+                    Dim json = JsonConvert.SerializeObject(libraryData, Formatting.Indented)
+                    File.WriteAllText(saveDialog.FileName, json)
+                Else
+                    ' Save as XML
+                    Using writer As New StreamWriter(saveDialog.FileName)
+                        Dim serializer As New XmlSerializer(GetType(MaterialLibrary))
+                        serializer.Serialize(writer, libraryData)
+                    End Using
+                End If
+                
+                MessageBox.Show($"Material library exported successfully." & vbCrLf & 
+                              $"Total materials: {materials.Count}", "Export Library", 
+                              MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Catch ex As Exception
+                MessageBox.Show($"Error exporting library: {ex.Message}", "Export Error", 
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+        End If
+    End Using
+End Sub
+
+' Add these new methods for binary save/load
+Private Sub SaveMaterialBinary(mat As Material, fileName As String)
+    Using stream As New FileStream(fileName, FileMode.Create)
+        Using writer As New BinaryWriter(stream)
+            ' Write version
+            writer.Write("MAT1.0")
+            
+            ' Write basic properties
+            writer.Write(mat.Name)
+            writer.Write(mat.DiffuseColor.ToArgb())
+            writer.Write(mat.AmbientColor.ToArgb())
+            writer.Write(mat.SpecularColor.ToArgb())
+            writer.Write(mat.EmissiveColor.ToArgb())
+            writer.Write(mat.Shininess)
+            writer.Write(mat.Opacity)
+            writer.Write(mat.Reflection)
+            writer.Write(mat.Refraction)
+            writer.Write(mat.BumpStrength)
+            
+            ' Write textures
+            writer.Write(mat.DiffuseTexture ?? "")
+            writer.Write(mat.NormalTexture ?? "")
+            writer.Write(mat.SpecularTexture ?? "")
+            
+            ' Write additional properties
+            writer.Write(mat.TwoSided)
+            writer.Write(mat.CastShadows)
+            writer.Write(mat.ReceiveShadows)
+            writer.Write(mat.Wireframe)
+            writer.Write(mat.FacetedShading)
+        End Using
+    End Using
+End Sub
+
+Private Function LoadMaterialBinary(fileName As String) As Material
+    Using stream As New FileStream(fileName, FileMode.Open)
+        Using reader As New BinaryReader(stream)
+            ' Check version
+            Dim version = reader.ReadString()
+            If Not version.StartsWith("MAT") Then
+                Throw New Exception("Invalid material file format")
+            End If
+            
+            Dim mat As New Material(reader.ReadString())
+            mat.DiffuseColor = Color.FromArgb(reader.ReadInt32())
+            mat.AmbientColor = Color.FromArgb(reader.ReadInt32())
+            mat.SpecularColor = Color.FromArgb(reader.ReadInt32())
+            mat.EmissiveColor = Color.FromArgb(reader.ReadInt32())
+            mat.Shininess = reader.ReadSingle()
+            mat.Opacity = reader.ReadSingle()
+            mat.Reflection = reader.ReadSingle()
+            mat.Refraction = reader.ReadSingle()
+            mat.BumpStrength = reader.ReadSingle()
+            
+            ' Read textures
+            Dim diffuseTex = reader.ReadString()
+            mat.DiffuseTexture = If(String.IsNullOrEmpty(diffuseTex), Nothing, diffuseTex)
+            
+            Dim normalTex = reader.ReadString()
+            mat.NormalTexture = If(String.IsNullOrEmpty(normalTex), Nothing, normalTex)
+            
+            Dim specularTex = reader.ReadString()
+            mat.SpecularTexture = If(String.IsNullOrEmpty(specularTex), Nothing, specularTex)
+            
+            ' Read additional properties
+            mat.TwoSided = reader.ReadBoolean()
+            mat.CastShadows = reader.ReadBoolean()
+            mat.ReceiveShadows = reader.ReadBoolean()
+            mat.Wireframe = reader.ReadBoolean()
+            mat.FacetedShading = reader.ReadBoolean()
+            
+            Return mat
+        End Using
+    End Using
+End Function
+
+Private Sub SaveMaterialJson(mat As Material, fileName As String)
+    Dim settings = New JsonSerializerSettings() With {
+        .Formatting = Formatting.Indented,
+        .NullValueHandling = NullValueHandling.Ignore
+    }
+    Dim json = JsonConvert.SerializeObject(mat, settings)
+    File.WriteAllText(fileName, json)
+End Sub
+
+Private Function LoadMaterialJson(fileName As String) As Material
+    Dim json = File.ReadAllText(fileName)
+    Return JsonConvert.DeserializeObject(Of Material)(json)
+End Function
+
+' Add this method to load the material library on startup
+Private Sub LoadMaterialLibrary()
+    If Not Directory.Exists(materialLibraryPath) Then
+        Directory.CreateDirectory(materialLibraryPath)
+    End If
+    
+    ' Check for default library file
+    Dim defaultLibraryFile = Path.Combine(materialLibraryPath, "DefaultLibrary.matlib")
+    If File.Exists(defaultLibraryFile) Then
+        Try
+            LoadLibraryFile(defaultLibraryFile)
+            Return
+        Catch ex As Exception
+            Debug.WriteLine($"Error loading default library: {ex.Message}")
+        End Try
+    End If
+    
+    ' Load all individual material files
+    Dim materialFiles = Directory.GetFiles(materialLibraryPath, "*.mat").
+                      Concat(Directory.GetFiles(materialLibraryPath, "*.json"))
+    
+    For Each file In materialFiles
+        Try
+            Dim mat As Material = Nothing
+            If Path.GetExtension(file).ToLower() = ".json" Then
+                mat = LoadMaterialJson(file)
+            Else
+                mat = LoadMaterialBinary(file)
+            End If
+            
+            If mat IsNot Nothing AndAlso Not materials.ContainsKey(mat.Name) Then
+                materials.Add(mat.Name, mat)
+            End If
+        Catch ex As Exception
+            ' Log error but continue loading other materials
+            Debug.WriteLine($"Error loading material from {file}: {ex.Message}")
+        End Try
+    Next
+    
+    UpdateMaterialList()
+End Sub
+
+' Add method to load library files
+Private Sub LoadLibraryFile(fileName As String)
+    Dim ext = Path.GetExtension(fileName).ToLower()
+    
+    If ext = ".json" Then
+        Dim json = File.ReadAllText(fileName)
+        Dim library = JsonConvert.DeserializeObject(Of MaterialLibrary)(json)
+        
+        If library?.Materials IsNot Nothing Then
+            For Each mat In library.Materials
+                If Not materials.ContainsKey(mat.Name) Then
+                    materials.Add(mat.Name, mat)
+                End If
+            Next
+        End If
+    ElseIf ext = ".matlib" Then
+        Using reader As New StreamReader(fileName)
+            Dim serializer As New XmlSerializer(GetType(MaterialLibrary))
+            Dim library = CType(serializer.Deserialize(reader), MaterialLibrary)
+            
+            If library?.Materials IsNot Nothing Then
+                For Each mat In library.Materials
+                    If Not materials.ContainsKey(mat.Name) Then
+                        materials.Add(mat.Name, mat)
+                    End If
+                Next
+            End If
+        End Using
+    End If
+End Sub
+
+' Add method to save the current library as default
+Private Sub SaveDefaultLibrary()
+    Try
+        Dim defaultLibraryFile = Path.Combine(materialLibraryPath, "DefaultLibrary.matlib")
+        Dim libraryData As New MaterialLibrary() With {
+            .Materials = materials.Values.ToList(),
+            .Version = "1.0",
+            .CreatedDate = DateTime.Now
+        }
+        
+        Using writer As New StreamWriter(defaultLibraryFile)
+            Dim serializer As New XmlSerializer(GetType(MaterialLibrary))
+            serializer.Serialize(writer, libraryData)
+        End Using
+    Catch ex As Exception
+        Debug.WriteLine($"Error saving default library: {ex.Message}")
+    End Try
+End Sub
+
+' Override the form closing to save the library
+Protected Overrides Sub OnFormClosing(e As FormClosingEventArgs)
+    ' Ask to save changes
+    If materials.Count > 0 Then
+        Dim result = MessageBox.Show("Save changes to material library?", "Save Changes", 
+                                   MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question)
+        
+        If result = DialogResult.Cancel Then
+            e.Cancel = True
+            Return
+        ElseIf result = DialogResult.Yes Then
+            SaveDefaultLibrary()
+        End If
+    End If
+    
+    MyBase.OnFormClosing(e)
+End Sub
+
+' Add import functionality for external material libraries
+Private Sub ImportMaterialLibrary()
+    Using openDialog As New OpenFileDialog()
+        openDialog.Filter = "Material Libraries|*.matlib;*.json;*.xml|All Files|*.*"
+        openDialog.Title = "Import Material Library"
+        
+        If openDialog.ShowDialog() = DialogResult.OK Then
+            Try
+                Dim importedCount = 0
+                LoadLibraryFile(openDialog.FileName)
+                
+                UpdateMaterialList()
+                MessageBox.Show($"Successfully imported {importedCount} materials.", "Import Complete", 
+                              MessageBoxButtons.OK, MessageBoxIcon.Information)
+            Catch ex As Exception
+                MessageBox.Show($"Error importing library: {ex.Message}", "Import Error", 
+                              MessageBoxButtons.OK, MessageBoxIcon.Error)
+            End Try
+        End If
+    End Using
+End Sub
+
+' Add method to get selected material
+Public ReadOnly Property SelectedMaterial As Material
+    Get
+        Return currentMaterial
+    End Get
+End Property
+
+' Add method to get all materials
+Public ReadOnly Property MaterialLibrary As Dictionary(Of String, Material)
+    Get
+        Return materials
+    End Get
+End Property
+
+' Add method to load existing materials from main form
+Public Sub LoadExistingMaterials(existingMaterials As Dictionary(Of String, Material))
+    materials.Clear()
+    For Each kvp In existingMaterials
+        materials.Add(kvp.Key, kvp.Value.Clone())
+    Next
+    UpdateMaterialList()
+End Sub
+
+' Add method to select a specific material
+Public Sub SelectMaterial(materialName As String)
+    If materials.ContainsKey(materialName) Then
+        materialListBox.SelectedItem = materialName
+    End If
+End Sub

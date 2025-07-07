@@ -1,0 +1,730 @@
+' Add these fields to the class
+Private lightingPanel As Panel
+Private lightPosition As New PointF(0.5F, 0.5F)
+Private lightIntensity As Single = 1.0F
+Private lightColor As Color = Color.White
+Private ambientLightColor As Color = Color.FromArgb(64, 64, 64)
+Private ambientIntensity As Single = 0.3F
+Private lightType As String = "Directional"
+Private showLightGizmo As Boolean = True
+
+' Modify InitializeComponents to add a Lighting tab
+Private Sub InitializeComponents()
+    ' ... existing code ...
+
+    ' After creating the Advanced tab, add a Lighting tab
+    Dim lightingTab As New TabPage("Lighting")
+    lightingPanel = CreateLightingPanel()
+    lightingTab.Controls.Add(lightingPanel)
+
+    ' Add the lighting tab before adding all tabs to propertyTabs
+    propertyTabs.TabPages.Add(basicTab)
+    propertyTabs.TabPages.Add(mapsTab)
+    propertyTabs.TabPages.Add(lightingTab)  ' Add this
+    propertyTabs.TabPages.Add(advancedTab)
+
+    ' ... rest of existing code ...
+End Sub
+
+' Add this new method to create the lighting panel
+Private Function CreateLightingPanel() As Panel
+    Dim panel As New Panel With {.Dock = DockStyle.Fill, .AutoScroll = True}
+    Dim y As Integer = 20
+
+    ' Light Type
+    Dim lblLightType As New Label With {
+        .Text = "Light Type:",
+        .Location = New Point(20, y),
+        .Width = 100
+    }
+    Dim cmbLightType As New ComboBox With {
+        .Location = New Point(130, y),
+        .Width = 150,
+        .DropDownStyle = ComboBoxStyle.DropDownList
+    }
+    cmbLightType.Items.AddRange({"Directional", "Point", "Spot", "Area"})
+    cmbLightType.SelectedItem = lightType
+    AddHandler cmbLightType.SelectedIndexChanged, Sub()
+        lightType = cmbLightType.SelectedItem.ToString()
+        previewPanel.Invalidate()
+    End Sub
+    y += 35
+
+    ' Light Position (X/Y for 2D preview)
+    Dim lblLightPos As New Label With {
+        .Text = "Light Position:",
+        .Location = New Point(20, y),
+        .Width = 100
+    }
+    
+    ' X Position
+    Dim lblX As New Label With {
+        .Text = "X:",
+        .Location = New Point(130, y),
+        .Width = 20
+    }
+    Dim lightXTrack As New TrackBar With {
+        .Location = New Point(155, y),
+        .Width = 150,
+        .Height = 45,
+        .Minimum = 0,
+        .Maximum = 100,
+        .TickFrequency = 10,
+        .Value = CInt(lightPosition.X * 100)
+    }
+    Dim lightXValue As New Label With {
+        .Location = New Point(310, y),
+        .AutoSize = True,
+        .Text = $"{lightPosition.X:F2}"
+    }
+    AddHandler lightXTrack.ValueChanged, Sub()
+        lightPosition.X = lightXTrack.Value / 100.0F
+        lightXValue.Text = $"{lightPosition.X:F2}"
+        previewPanel.Invalidate()
+    End Sub
+    y += 30
+
+    ' Y Position
+    Dim lblY As New Label With {
+        .Text = "Y:",
+        .Location = New Point(130, y),
+        .Width = 20
+    }
+    Dim lightYTrack As New TrackBar With {
+        .Location = New Point(155, y),
+        .Width = 150,
+        .Height = 45,
+        .Minimum = 0,
+        .Maximum = 100,
+        .TickFrequency = 10,
+        .Value = CInt(lightPosition.Y * 100)
+    }
+    Dim lightYValue As New Label With {
+        .Location = New Point(310, y),
+        .AutoSize = True,
+        .Text = $"{lightPosition.Y:F2}"
+    }
+    AddHandler lightYTrack.ValueChanged, Sub()
+        lightPosition.Y = lightYTrack.Value / 100.0F
+        lightYValue.Text = $"{lightPosition.Y:F2}"
+        previewPanel.Invalidate()
+    End Sub
+    y += 50
+
+    ' Light Color
+    Dim lblLightColor As New Label With {
+        .Text = "Light Color:",
+        .Location = New Point(20, y),
+        .Width = 100
+    }
+    Dim lightColorPanel As New Panel With {
+        .Location = New Point(130, y - 2),
+        .Size = New Size(50, 20),
+        .BorderStyle = BorderStyle.FixedSingle,
+        .BackColor = lightColor,
+        .Cursor = Cursors.Hand
+    }
+    Dim btnLightColor As New Button With {
+        .Text = "...",
+        .Location = New Point(185, y - 2),
+        .Size = New Size(30, 20)
+    }
+    AddHandler lightColorPanel.Click, Sub()
+        Using colorDialog As New ColorDialog()
+            colorDialog.Color = lightColor
+            If colorDialog.ShowDialog() = DialogResult.OK Then
+                lightColor = colorDialog.Color
+                lightColorPanel.BackColor = lightColor
+                previewPanel.Invalidate()
+            End If
+        End Using
+    End Sub
+    AddHandler btnLightColor.Click, Sub()
+        lightColorPanel.PerformClick()
+    End Sub
+    y += 35
+
+    ' Light Intensity
+    Dim lblIntensity As New Label With {
+        .Text = "Light Intensity:",
+        .Location = New Point(20, y),
+        .Width = 100
+    }
+    Dim intensityTrack As New TrackBar With {
+        .Location = New Point(130, y),
+        .Width = 200,
+        .Height = 45,
+        .Minimum = 0,
+        .Maximum = 200,
+        .TickFrequency = 20,
+        .Value = CInt(lightIntensity * 100)
+    }
+    Dim intensityValue As New Label With {
+        .Location = New Point(340, y),
+        .AutoSize = True,
+        .Text = $"{lightIntensity:F2}"
+    }
+    AddHandler intensityTrack.ValueChanged, Sub()
+        lightIntensity = intensityTrack.Value / 100.0F
+        intensityValue.Text = $"{lightIntensity:F2}"
+        previewPanel.Invalidate()
+    End Sub
+    y += 50
+
+    ' Separator
+    Dim separator1 As New Label With {
+        .Location = New Point(20, y),
+        .Size = New Size(350, 2),
+        .BorderStyle = BorderStyle.Fixed3D
+    }
+    y += 15
+
+    ' Ambient Light Section
+    Dim lblAmbientSection As New Label With {
+        .Text = "Ambient Light Settings",
+        .Location = New Point(20, y),
+        .AutoSize = True,
+        .Font = New Font("Arial", 9, FontStyle.Bold)
+    }
+    y += 25
+
+    ' Ambient Light Color
+    Dim lblAmbientColor As New Label With {
+        .Text = "Ambient Color:",
+        .Location = New Point(20, y),
+        .Width = 100
+    }
+    Dim ambientColorPanel As New Panel With {
+        .Location = New Point(130, y - 2),
+        .Size = New Size(50, 20),
+        .BorderStyle = BorderStyle.FixedSingle,
+        .BackColor = ambientLightColor,
+        .Cursor = Cursors.Hand
+    }
+    Dim btnAmbientColor As New Button With {
+        .Text = "...",
+        .Location = New Point(185, y - 2),
+        .Size = New Size(30, 20)
+    }
+    AddHandler ambientColorPanel.Click, Sub()
+        Using colorDialog As New ColorDialog()
+            colorDialog.Color = ambientLightColor
+            If colorDialog.ShowDialog() = DialogResult.OK Then
+                ambientLightColor = colorDialog.Color
+                ambientColorPanel.BackColor = ambientLightColor
+                previewPanel.Invalidate()
+            End If
+        End Using
+    End Sub
+    AddHandler btnAmbientColor.Click, Sub()
+        ambientColorPanel.PerformClick()
+    End Sub
+    y += 35
+
+    ' Ambient Intensity
+    Dim lblAmbientIntensity As New Label With {
+        .Text = "Ambient Intensity:",
+        .Location = New Point(20, y),
+        .Width = 100
+    }
+    Dim ambientTrack As New TrackBar With {
+        .Location = New Point(130, y),
+        .Width = 200,
+        .Height = 45,
+        .Minimum = 0,
+        .Maximum = 100,
+        .TickFrequency = 10,
+        .Value = CInt(ambientIntensity * 100)
+    }
+    Dim ambientValue As New Label With {
+        .Location = New Point(340, y),
+        .AutoSize = True,
+        .Text = $"{ambientIntensity:F2}"
+    }
+    AddHandler ambientTrack.ValueChanged, Sub()
+        ambientIntensity = ambientTrack.Value / 100.0F
+        ambientValue.Text = $"{ambientIntensity:F2}"
+        previewPanel.Invalidate()
+    End Sub
+    y += 50
+
+    ' Separator
+    Dim separator2 As New Label With {
+        .Location = New Point(20, y),
+        .Size = New Size(350, 2),
+        .BorderStyle = BorderStyle.Fixed3D
+    }
+    y += 15
+
+    ' Lighting Presets
+    Dim lblPresets As New Label With {
+        .Text = "Lighting Presets:",
+        .Location = New Point(20, y),
+        .Width = 100
+    }
+    Dim cmbPresets As New ComboBox With {
+        .Location = New Point(130, y),
+        .Width = 200,
+        .DropDownStyle = ComboBoxStyle.DropDownList
+    }
+    cmbPresets.Items.AddRange({
+        "Default", "Studio", "Outdoor", "Night", "Sunset", 
+        "High Key", "Low Key", "Rim Light", "Three Point"
+    })
+    AddHandler cmbPresets.SelectedIndexChanged, Sub()
+        ApplyLightingPreset(cmbPresets.SelectedItem.ToString())
+    End Sub
+    y += 35
+
+    ' Additional Options
+    Dim chkShowGizmo As New CheckBox With {
+        .Text = "Show Light Gizmo",
+        .Location = New Point(20, y),
+        .Width = 150,
+        .Checked = showLightGizmo
+    }
+    AddHandler chkShowGizmo.CheckedChanged, Sub()
+        showLightGizmo = chkShowGizmo.Checked
+        previewPanel.Invalidate()
+    End Sub
+    y += 25
+
+    Dim chkCastShadows As New CheckBox With {
+        .Text = "Cast Shadows",
+        .Location = New Point(20, y),
+        .Width = 150,
+        .Checked = True
+    }
+    y += 25
+
+    ' Interactive light control note
+    Dim lblNote As New Label With {
+        .Text = "Tip: Right-click and drag in preview to move light",
+        .Location = New Point(20, y),
+        .AutoSize = True,
+        .ForeColor = Color.Gray,
+        .Font = New Font("Arial", 8, FontStyle.Italic)
+    }
+
+    ' Store references
+    lightXTrack.Tag = "LightXTrack"
+    lightYTrack.Tag = "LightYTrack"
+    intensityTrack.Tag = "IntensityTrack"
+    ambientTrack.Tag = "AmbientTrack"
+
+    ' Add all controls
+    panel.Controls.AddRange({
+        lblLightType, cmbLightType,
+        lblLightPos, lblX, lightXTrack, lightXValue,
+        lblY, lightYTrack, lightYValue,
+        lblLightColor, lightColorPanel, btnLightColor,
+        lblIntensity, intensityTrack, intensityValue,
+        separator1,
+        lblAmbientSection,
+        lblAmbientColor, ambientColorPanel, btnAmbientColor,
+        lblAmbientIntensity, ambientTrack, ambientValue,
+        separator2,
+        lblPresets, cmbPresets,
+        chkShowGizmo, chkCastShadows,
+        lblNote
+    })
+
+    Return panel
+End Function
+
+' Add method to apply lighting presets
+Private Sub ApplyLightingPreset(preset As String)
+    Select Case preset
+        Case "Default"
+            lightPosition = New PointF(0.5F, 0.5F)
+            lightIntensity = 1.0F
+            lightColor = Color.White
+            ambientLightColor = Color.FromArgb(64, 64, 64)
+            ambientIntensity = 0.3F
+            
+        Case "Studio"
+            lightPosition = New PointF(0.3F, 0.3F)
+            lightIntensity = 1.2F
+            lightColor = Color.FromArgb(255, 250, 245)
+            ambientLightColor = Color.FromArgb(40, 40, 45)
+            ambientIntensity = 0.2F
+            
+        Case "Outdoor"
+            lightPosition = New PointF(0.6F, 0.2F)
+            lightIntensity = 1.5F
+            lightColor = Color.FromArgb(255, 255, 240)
+            ambientLightColor = Color.FromArgb(100, 120, 140)
+            ambientIntensity = 0.4F
+            
+        Case "Night"
+            lightPosition = New PointF(0.5F, 0.3F)
+            lightIntensity = 0.5F
+            lightColor = Color.FromArgb(180, 200, 255)
+            ambientLightColor = Color.FromArgb(20, 25, 40)
+            ambientIntensity = 0.15F
+            
+        Case "Sunset"
+            lightPosition = New PointF(0.8F, 0.6F)
+            lightIntensity = 1.3F
+            lightColor = Color.FromArgb(255, 200, 100)
+            ambientLightColor = Color.FromArgb(80, 60, 40)
+            ambientIntensity = 0.35F
+            
+        Case "High Key"
+            lightPosition = New PointF(0.5F, 0.3F)
+            lightIntensity = 1.8F
+            lightColor = Color.White
+            ambientLightColor = Color.FromArgb(180, 180, 180)
+            ambientIntensity = 0.6F
+            
+        Case "Low Key"
+            lightPosition = New PointF(0.2F, 0.4F)
+            lightIntensity = 0.8F
+            lightColor = Color.FromArgb(255, 240, 220)
+            ambientLightColor = Color.FromArgb(20, 20, 20)
+            ambientIntensity = 0.1F
+            
+        Case "Rim Light"
+            lightPosition = New PointF(0.9F, 0.5F)
+            lightIntensity = 1.5F
+            lightColor = Color.White
+            ambientLightColor = Color.FromArgb(30, 30, 30)
+            ambientIntensity = 0.15F
+            
+        Case "Three Point"
+            ' Main key light
+            lightPosition = New PointF(0.3F, 0.4F)
+            lightIntensity = 1.0F
+            lightColor = Color.FromArgb(255, 250, 240)
+            ambientLightColor = Color.FromArgb(50, 50, 55)
+            ambientIntensity = 0.25F
+    End Select
+    
+    ' Update UI controls
+    UpdateLightingControls()
+    previewPanel.Invalidate()
+End Sub
+
+' Add method to update lighting controls
+Private Sub UpdateLightingControls()
+    ' Find and update lighting controls
+    If lightingPanel IsNot Nothing Then
+        For Each ctrl In lightingPanel.Controls
+            Select Case ctrl.Tag?.ToString()
+                Case "LightXTrack"
+                    CType(ctrl, TrackBar).Value = CInt(lightPosition.X * 100)
+                Case "LightYTrack"
+                    CType(ctrl, TrackBar).Value = CInt(lightPosition.Y * 100)
+                Case "IntensityTrack"
+                    CType(ctrl, TrackBar).Value = CInt(lightIntensity * 100)
+                Case "AmbientTrack"
+                    CType(ctrl, TrackBar).Value = CInt(ambientIntensity * 100)
+            End Select
+        Next
+    End If
+End Sub
+
+' Enhanced DrawPreviewSphere method with improved lighting
+Private Sub DrawPreviewSphere(g As Graphics, center As Point, radius As Integer)
+    Using path As New Drawing2D.GraphicsPath()
+        path.AddEllipse(center.X - radius, center.Y - radius, radius * 2, radius * 2)
+
+        Using brush As New Drawing2D.PathGradientBrush(path)
+            ' Calculate light direction based on position
+            Dim lightDir = New PointF(
+                (lightPosition.X - 0.5F) * radius,
+                (lightPosition.Y - 0.5F) * radius
+            )
+            
+            ' Apply light color influence
+            Dim litDiffuse = BlendColors(currentMaterial.DiffuseColor, lightColor, lightIntensity * 0.5F)
+            
+            ' Mix with ambient light
+            Dim ambientContribution = BlendColors(currentMaterial.AmbientColor, ambientLightColor, ambientIntensity)
+            
+            ' Combine lighting
+            Dim finalColor = BlendColors(ambientContribution, litDiffuse, 1.0F - ambientIntensity)
+            
+            ' Apply material colors with lighting
+            Dim litColor = BlendColors(finalColor, currentMaterial.SpecularColor,
+                                     currentMaterial.Shininess / 256.0F)
+
+            brush.CenterColor = Color.FromArgb(
+                CInt(currentMaterial.Opacity * 255),
+                litColor
+            )
+            
+            ' Shadow color influenced by ambient
+            Dim shadowColor = BlendColors(ambientContribution, Color.Black, 0.5F)
+            
+            brush.SurroundColors = {Color.FromArgb(
+                CInt(currentMaterial.Opacity * 255),
+                shadowColor
+            )}
+
+            brush.FocusScales = New PointF(0.3F, 0.3F)
+            brush.CenterPoint = New PointF(
+                center.X + lightDir.X,
+                center.Y + lightDir.Y
+            )
+
+            g.FillPath(brush, path)
+        End Using
+
+        ' Enhanced specular highlight
+        If currentMaterial.Shininess > 0 Then
+            DrawSpecularHighlight(g, center, radius)
+        End If
+
+        ' Add emissive glow if present
+        If currentMaterial.EmissiveColor.GetBrightness() > 0 Then
+            Using glowBrush As New Drawing2D.PathGradientBrush(path)
+                Dim glowIntensity = currentMaterial.EmissiveColor.GetBrightness() * lightIntensity
+                glowBrush.CenterColor = Color.FromArgb(CInt(100 * glowIntensity), currentMaterial.EmissiveColor)
+                glowBrush.SurroundColors = {Color.Transparent}
+                g.FillPath(glowBrush, path)
+            End Using
+        End If
+
+        ' Draw rim if reflective
+        If currentMaterial.Reflection > 0 Then
+            Using pen As New Pen(Color.FromArgb(CInt(100 * currentMaterial.Reflection), lightColor), 2)
+                g.DrawEllipse(pen, center.X - radius, center.Y - radius, radius * 2, radius * 2)
+            End Using
+        End If
+    End Using
+    
+    ' Draw light gizmo if enabled
+    If showLightGizmo Then
+        DrawLightGizmo(g, center, radius)
+    End If
+End Sub
+
+' Add enhanced specular highlight with light color
+Private Sub DrawSpecularHighlight(g As Graphics, center As Point, radius As Integer)
+    Dim lightScreenPos = New Point(
+        CInt(center.X + (lightPosition.X - 0.5F) * radius * 2),
+        CInt(center.Y + (lightPosition.Y - 0.5F) * radius * 2)
+    )
+    
+    Dim highlightSize = radius * 0.3F * (currentMaterial.Shininess / 256.0F) * lightIntensity
+    Dim highlightPos = New Point(
+        CInt(center.X + (lightPosition.X - 0.5F) * radius * 0.6F),
+        CInt(center.Y + (lightPosition.Y - 0.5F) * radius * 0.6F)
+    )
+    
+    Using path As New Drawing2D.GraphicsPath()
+        path.AddEllipse(
+            highlightPos.X - highlightSize,
+            highlightPos.Y - highlightSize,
+            highlightSize * 2,
+            highlightSize * 2
+        )
+        
+        Using brush As New Drawing2D.PathGradientBrush(path)
+            ' Specular color influenced by light color
+            Dim specColor = BlendColors(currentMaterial.SpecularColor, lightColor, 0.5F)
+            
+            brush.CenterColor = Color.FromArgb(
+                CInt(200 * (currentMaterial.Shininess / 256.0F) * lightIntensity),
+                specColor
+            )
+            brush.SurroundColors = {Color.Transparent}
+            brush.FocusScales = New PointF(0.3F, 0.3F)
+            
+            g.FillPath(brush, path)
+        End Using
+    End Using
+End Sub
+
+' Add method to draw light gizmo
+Private Sub DrawLightGizmo(g As Graphics, center As Point, radius As Integer)
+    Dim lightScreenPos = New PointF(
+        lightPosition.X * previewPanel.Width,
+        lightPosition.Y * previewPanel.Height
+    )
+    
+    ' Draw light icon based on type
+    Select Case lightType
+        Case "Directional"
+            DrawDirectionalLight(g, lightScreenPos)
+        Case "Point"
+            DrawPointLight(g, lightScreenPos)
+        Case "Spot"
+            DrawSpotLight(g, lightScreenPos)
+        Case "Area"
+            DrawAreaLight(g, lightScreenPos)
+    End Select
+    
+    ' Draw light name
+    Using font As New Font("Arial", 8)
+        Dim text = $"{lightType} Light"
+        Dim textSize = g.MeasureString(text, font)
+        g.DrawString(text, font, Brushes.White, 
+                    lightScreenPos.X - textSize.Width / 2, 
+                    lightScreenPos.Y + 20)
+    End Using
+End Sub
+
+Private Sub DrawDirectionalLight(g As Graphics, pos As PointF)
+    ' Draw sun-like icon for directional light
+    Using brush As New SolidBrush(Color.FromArgb(200, lightColor))
+        g.FillEllipse(brush, pos.X - 10, pos.Y - 10, 20, 20)
+    End Using
+    
+    ' Draw rays
+    Using pen As New Pen(Color.FromArgb(150, lightColor), 2)
+        For angle = 0 To 315 Step 45
+            Dim rad = angle * Math.PI / 180
+            Dim x1 = pos.X + Math.Cos(rad) * 15
+            Dim y1 = pos.Y + Math.Sin(rad) * 15
+            Dim x2 = pos.X + Math.Cos(rad) * 25
+            Dim y2 = pos.Y + Math.Sin(rad) * 25
+            g.DrawLine(pen, CSng(x1), CSng(y1), CSng(x2), CSng(y2))
+        Next
+    End Using
+End Sub
+
+Private Sub DrawPointLight(g As Graphics, pos As PointF)
+    ' Draw glowing orb for point light
+    Using path As New Drawing2D.GraphicsPath()
+        path.AddEllipse(pos.X - 12, pos.Y - 12, 24, 24)
+        
+        Using brush As New Drawing2D.PathGradientBrush(path)
+            brush.CenterColor = Color.FromArgb(255, lightColor)
+            brush.SurroundColors = {Color.FromArgb(0, lightColor)}
+            g.FillPath(brush, path)
+        End Using
+    End Using
+    
+    ' Draw center point
+    Using brush As New SolidBrush(lightColor)
+        g.FillEllipse(brush, pos.X - 4, pos.Y - 4, 8, 8)
+    End Using
+End Sub
+
+Private Sub DrawSpotLight(g As Graphics, pos As PointF)
+    ' Draw cone for spot light
+    Dim points() As PointF = {
+        New PointF(pos.X, pos.Y),
+        New PointF(pos.X - 15, pos.Y + 25),
+        New PointF(pos.X + 15, pos.Y + 25)
+    }
+    
+    Using brush As New Drawing2D.LinearGradientBrush(
+        pos, New PointF(pos.X, pos.Y + 25),
+        Color.FromArgb(200, lightColor), Color.FromArgb(0, lightColor))
+        g.FillPolygon(brush, points)
+    End Using
+    
+    ' Draw light source
+    Using brush As New SolidBrush(lightColor)
+        g.FillEllipse(brush, pos.X - 5, pos.Y - 5, 10, 10)
+    End Using
+End Sub
+
+Private Sub DrawAreaLight(g As Graphics, pos As PointF)
+    ' Draw rectangle for area light
+    Using brush As New SolidBrush(Color.FromArgb(100, lightColor))
+        g.FillRectangle(brush, pos.X - 15, pos.Y - 10, 30, 20)
+    End Using
+    
+    Using pen As New Pen(lightColor, 2)
+        g.DrawRectangle(pen, pos.X - 15, pos.Y - 10, 30, 20)
+    End Using
+End Sub
+
+' Enhanced DrawPreview method with lighting info
+Private Sub DrawPreview(sender As Object, e As PaintEventArgs)
+    Dim g As Graphics = e.Graphics
+    g.SmoothingMode = Drawing2D.SmoothingMode.AntiAlias
+    
+    ' Apply ambient light to background
+    Dim bgColor = BlendColors(Color.FromArgb(40, 40, 40), ambientLightColor, ambientIntensity * 0.3F)
+    g.Clear(bgColor)
+
+    If currentMaterial Is Nothing Then Return
+
+    Dim center As New Point(previewPanel.Width \ 2, previewPanel.Height \ 2)
+    Dim radius As Integer = Math.Min(previewPanel.Width, previewPanel.Height) \ 3
+
+    ' Draw preview shape based on material properties
+    DrawPreviewSphere(g, center, radius)
+
+    ' Draw material name
+    Using font As New Font("Arial", 10, FontStyle.Bold)
+        Dim textSize = g.MeasureString(currentMaterial.Name, font)
+        g.DrawString(currentMaterial.Name, font, Brushes.White,
+                    center.X - textSize.Width / 2, previewPanel.Height - 30)
+    End Using
+    
+    ' Draw lighting info
+    Using font As New Font("Arial", 8)
+        Dim info = $"Light: {lightType} | Intensity: {lightIntensity:F1}"
+        g.DrawString(info, font, Brushes.Gray, 5, 5)
+    End Using
+End Sub
+
+' Modify the existing event handlers in InitializeComponents to support light dragging
+Private Sub InitializeComponents()
+    ' ... existing code ...
+
+    ' Add these mouse handlers for interactive light control
+    Dim isDraggingLight As Boolean = False
+    
+    AddHandler previewPanel.MouseDown, Sub(s, e As MouseEventArgs)
+        If e.Button = MouseButtons.Right Then
+            isDraggingLight = True
+            previewPanel.Cursor = Cursors.Cross
+        End If
+    End Sub
+    
+    AddHandler previewPanel.MouseMove, Sub(s, e As MouseEventArgs)
+        If isDraggingLight Then
+            lightPosition.X = CSng(e.X) / previewPanel.Width
+            lightPosition.Y = CSng(e.Y) / previewPanel.Height
+            
+            ' Clamp values
+            lightPosition.X = Math.Max(0, Math.Min(1, lightPosition.X))
+            lightPosition.Y = Math.Max(0, Math.Min(1, lightPosition.Y))
+            
+            UpdateLightingControls()
+            previewPanel.Invalidate()
+        End If
+    End Sub
+    
+    AddHandler previewPanel.MouseUp, Sub(s, e As MouseEventArgs)
+        If e.Button = MouseButtons.Right Then
+            isDraggingLight = False
+            previewPanel.Cursor = Cursors.Default
+        End If
+    End Sub
+    
+    ' ... rest of existing code ...
+End Sub
+
+' Add method to get/set lighting settings
+Public ReadOnly Property LightingSettings As Dictionary(Of String, Object)
+    Get
+        Return New Dictionary(Of String, Object) From {
+            {"LightType", lightType},
+            {"LightPosition", lightPosition},
+            {"LightIntensity", lightIntensity},
+            {"LightColor", lightColor},
+            {"AmbientColor", ambientLightColor},
+            {"AmbientIntensity", ambientIntensity}
+        }
+    End Get
+End Property
+
+Public Sub SetLightingSettings(settings As Dictionary(Of String, Object))
+    If settings.ContainsKey("LightType") Then lightType = settings("LightType").ToString()
+    If settings.ContainsKey("LightPosition") Then lightPosition = CType(settings("LightPosition"), PointF)
+    If settings.ContainsKey("LightIntensity") Then lightIntensity = CSng(settings("LightIntensity"))
+    If settings.ContainsKey("LightColor") Then lightColor = CType(settings("LightColor"), Color)
+    If settings.ContainsKey("AmbientColor") Then ambientLightColor = CType(settings("AmbientColor"), Color)
+    If settings.ContainsKey("AmbientIntensity") Then ambientIntensity = CSng(settings("AmbientIntensity"))
+    
+    UpdateLightingControls()
+    previewPanel.Invalidate()
+End Sub

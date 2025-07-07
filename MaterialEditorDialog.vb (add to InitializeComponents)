@@ -1,0 +1,40 @@
+' Add this after creating the main split container
+Dim menuStrip As New MenuStrip()
+
+' File menu
+Dim fileMenu As New ToolStripMenuItem("File")
+fileMenu.DropDownItems.Add("New Material", Nothing, AddressOf CreateNewMaterial)
+fileMenu.DropDownItems.Add(New ToolStripSeparator())
+fileMenu.DropDownItems.Add("Save Material", Nothing, AddressOf SaveMaterial)
+fileMenu.DropDownItems.Add("Load Material", Nothing, AddressOf LoadMaterial)
+fileMenu.DropDownItems.Add(New ToolStripSeparator())
+fileMenu.DropDownItems.Add("Import Library...", Nothing, Sub() ImportMaterialLibrary())
+fileMenu.DropDownItems.Add("Export Library...", Nothing, AddressOf ExportMaterialLibrary)
+fileMenu.DropDownItems.Add(New ToolStripSeparator())
+fileMenu.DropDownItems.Add("Save All", Nothing, Sub() SaveDefaultLibrary())
+
+' Edit menu
+Dim editMenu As New ToolStripMenuItem("Edit")
+editMenu.DropDownItems.Add("Clone Material", Nothing, AddressOf CloneMaterial)
+editMenu.DropDownItems.Add("Delete Material", Nothing, AddressOf DeleteMaterial)
+editMenu.DropDownItems.Add(New ToolStripSeparator())
+editMenu.DropDownItems.Add("Reset to Default", Nothing, Sub()
+    If currentMaterial IsNot Nothing AndAlso 
+       MessageBox.Show("Reset material to default values?", "Reset Material", 
+                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) = DialogResult.Yes Then
+        currentMaterial.DiffuseColor = Color.Gray
+        currentMaterial.AmbientColor = Color.FromArgb(64, 64, 64)
+        currentMaterial.SpecularColor = Color.White
+        currentMaterial.Shininess = 32.0F
+        currentMaterial.Opacity = 1.0F
+        currentMaterial.Reflection = 0.0F
+        UpdatePropertyControls()
+        previewPanel.Invalidate()
+    End If
+End Sub)
+
+menuStrip.Items.Add(fileMenu)
+menuStrip.Items.Add(editMenu)
+
+Me.Controls.Add(menuStrip)
+Me.MainMenuStrip = menuStrip

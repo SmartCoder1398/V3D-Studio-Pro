@@ -1,0 +1,707 @@
+' Add these imports at the top of the file
+Imports System.Drawing.Drawing2D
+Imports System.Drawing.Imaging
+
+' Add these fields to the class
+Private textureCache As New Dictionary(Of String, Image)
+Private previewMode As String = "Sphere" ' Can be "Sphere", "Cube", "Plane"
+Private lightingEnabled As Boolean = True
+Private rotationAngle As Single = 0
+
+' Replace the existing CreateTexturePreviewPanel method with this enhanced version
+Private Function CreateTexturePreviewPanel() As Panel
+    Dim panel As New Panel With {.Dock = DockStyle.Fill}
+    
+    ' Add toolbar for preview options
+    Dim toolbar As New ToolStrip With {
+        .Dock = DockStyle.Top,
+        .GripStyle = ToolStripGripStyle.Hidden
+    }
+    
+    ' Preview shape selector
+    Dim shapeLabel As New ToolStripLabel("Shape:")
+    Dim shapeCombo As New ToolStripComboBox With {
+        .DropDownStyle = ComboBoxStyle.DropDownList,
+        .Width = 80
+    }
+    shapeCombo.Items.AddRange({"Sphere", "Cube", "Plane"})
+    shapeCombo.SelectedIndex = 0
+    
+    ' Lighting toggle
+    Dim lightingButton As New ToolStripButton With {
+        .Text = "Lighting",
+        .CheckOnClick = True,
+        .Checked = True
+    }
+    
+    ' Auto-rotate toggle
+    Dim rotateButton As New ToolStripButton With {
+        .Text = "Auto-Rotate",
+        .CheckOnClick = True
+    }
+    
+    ' Zoom slider
+    Dim zoomLabel As New ToolStripLabel("Zoom:")
+    Dim zoomSlider As New TrackBar With {
+        .Minimum = 50,
+        .Maximum = 200,
+        .Value = 100,
+        .Width = 100,
+        .TickStyle = TickStyle.None
+    }
+    Dim zoomHost As New ToolStripControlHost(zoomSlider)
+    
+    toolbar.Items.AddRange({shapeLabel, shapeCombo, New ToolStripSeparator(), 
+                          lightingButton, rotateButton, New ToolStripSeparator(),
+                          zoomLabel, zoomHost})
+    
+    ' Main preview container
+    Dim previewContainer As New Panel With {
+        .Dock = DockStyle.Fill,
+        .BackColor = Color.FromArgb(50, 50, 50)
+    }
+    
+    ' Create split container for preview and texture panels
+    Dim splitContainer As New SplitContainer With {
+        .Dock = DockStyle.Fill,
+        .Orientation = Orientation.Horizontal,
+        .SplitterDistance = 300
+    }
+    
+    ' 3D Preview panel
+    Dim preview3DPanel As New Panel With {
+        .Dock = DockStyle.Fill,
+        .BackColor = Color.Black
+    }
+    
+    ' Texture thumbnails panel
+    Dim textureThumbsPanel As New Panel With {
+        .Dock = DockStyle.Fill,
+        .AutoScroll = True
+    }
+    
+    ' Create texture thumbnail controls
+    Dim thumbsLayout As New FlowLayoutPanel With {
+        .Dock = DockStyle.Fill,
+        .FlowDirection = FlowDirection.LeftToRight,
+        .AutoScroll = True,
+        .Padding = New Padding(5)
+    }
+    
+    ' Diffuse texture thumbnail
+    diffuseTexturePanel = CreateTextureThumbnail("Diffuse", 150, 150)
+    normalTexturePanel = CreateTextureThumbnail("Normal", 150, 150)
+    specularTexturePanel = CreateTextureThumbnail("Specular", 150, 150)
+    
+    ' Add additional texture slots
+    Dim emissivePanel = CreateTextureThumbnail("Emissive", 150, 150)
+    Dim roughnessPanel = CreateTextureThumbnail("Roughness", 150, 150)
+    Dim aoPanel = CreateTextureThumbnail("Ambient Occlusion", 150, 150)
+    
+    thumbsLayout.Controls.AddRange({diffuseTexturePanel, normalTexturePanel, 
+                                  specularTexturePanel, emissivePanel, 
+                                  roughnessPanel, aoPanel})
+    
+    textureThumbsPanel.Controls.Add(thumbsLayout)
+    
+    splitContainer.Panel1.Controls.Add(preview3DPanel)
+    splitContainer.Panel2.Controls.Add(textureThumbsPanel)
+    
+    previewContainer.Controls.Add(splitContainer)
+    
+    panel.Controls.Add(previewContainer)
+    panel.Controls.Add(toolbar)
+    
+    ' Event handlers
+    AddHandler shapeCombo.SelectedIndexChanged, Sub()
+        previewMode = shapeCombo.SelectedItem.ToString()
+        preview3DPanel.Invalidate()
+    End Sub
+    
+    AddHandler lightingButton.Click, Sub()
+        lightingEnabled = lightingButton.Checked
+        preview3DPanel.Invalidate()
+    End Sub
+    
+    ' Setup rotation timer
+    Dim rotateTimer As New Timer With {.Interval = 50}
+    AddHandler rotateTimer.Tick, Sub()
+        rotationAngle += 0.02F
+        If rotationAngle > Math.PI * 2 Then rotationAngle = 0
+        preview3DPanel.Invalidate()
+    End Sub
+    
+    AddHandler rotateButton.Click, Sub()
+        If rotateButton.Checked Then
+            rotateTimer.Start()
+        Else
+            rotateTimer.Stop()
+        End If
+    End Sub
+    
+    AddHandler zoomSlider.ValueChanged, Sub()
+        preview3DPanel.Tag = zoomSlider.Value / 100.0F
+        preview3DPanel.Invalidate()
+    End Sub
+    
+    ' Paint handler for 3D preview
+    AddHandler preview3DPanel.Paint, AddressOf DrawTextured3DPreview
+    
+    ' Mouse interaction for manual rotation
+    Dim isDragging As Boolean = False
+    Dim lastMousePos As Point
+    
+    AddHandler preview3DPanel.MouseDown, Sub(s, e)
+        If e.Button = MouseButtons.Left Then
+            isDragging = True
+            lastMousePos = e.Location
+            preview3DPanel.Cursor = Cursors.Hand
+        End If
+    End Sub
+    
+    AddHandler preview3DPanel.MouseMove, Sub(s, e)
+        If isDragging Then
+            Dim deltaX = e.X - lastMousePos.X
+            rotationAngle += deltaX * 0.01F
+            preview3DPanel.Invalidate()
+            lastMousePos = e.Location
+        End If
+    End Sub
+    
+    AddHandler preview3DPanel.MouseUp, Sub(s, e)
+        isDragging = False
+        preview3DPanel.Cursor = Cursors.Default
+    End Sub
+    
+    Return panel
+End Function
+
+Private Function CreateTextureThumbnail(name As String, width As Integer, height As Integer) As Panel
+    Dim container As New Panel With {
+        .Size = New Size(width + 10, height + 30),
+        .BorderStyle = BorderStyle.FixedSingle,
+        .Margin = New Padding(5)
+    }
+    
+    Dim label As New Label With {
+        .Text = name,
+        .Dock = DockStyle.Top,
+        .TextAlign = ContentAlignment.MiddleCenter,
+        .Height = 20,
+        .Font = New Font("Arial", 8, FontStyle.Bold)
+    }
+    
+    Dim imagePanel As New Panel With {
+        .Size = New Size(width, height),
+        .Location = New Point(5, 25),
+        .BorderStyle = BorderStyle.FixedSingle,
+        .BackgroundImageLayout = ImageLayout.Zoom,
+        .BackColor = Color.FromArgb(60, 60, 60),
+        .Cursor = Cursors.Hand,
+        .Tag = name
+    }
+    
+    ' Add drop indicator
+    Dim dropLabel As New Label With {
+        .Text = "Drop image here" & vbCrLf & "or click to browse",
+        .Dock = DockStyle.Fill,
+        .TextAlign = ContentAlignment.MiddleCenter,
+        .ForeColor = Color.Gray,
+        .Font = New Font("Arial", 8),
+        .Visible = True
+    }
+    
+    imagePanel.Controls.Add(dropLabel)
+    
+    ' Enable drag-drop
+    imagePanel.AllowDrop = True
+    
+    AddHandler imagePanel.DragEnter, Sub(s, e)
+        If e.Data.GetDataPresent(DataFormats.FileDrop) Then
+            e.Effect = DragDropEffects.Copy
+            imagePanel.BackColor = Color.FromArgb(80, 80, 80)
+        End If
+    End Sub
+    
+    AddHandler imagePanel.DragLeave, Sub(s, e)
+        imagePanel.BackColor = Color.FromArgb(60, 60, 60)
+    End Sub
+    
+    AddHandler imagePanel.DragDrop, Sub(s, e)
+        Dim files = CType(e.Data.GetData(DataFormats.FileDrop), String())
+        If files.Length > 0 AndAlso IsImageFile(files(0)) Then
+            LoadTextureToPanel(imagePanel, files(0), name)
+        End If
+        imagePanel.BackColor = Color.FromArgb(60, 60, 60)
+    End Sub
+    
+    ' Click to browse
+    AddHandler imagePanel.Click, Sub()
+        BrowseTextureForPanel(imagePanel, name)
+    End Sub
+    
+    ' Right-click context menu
+    Dim contextMenu As New ContextMenuStrip()
+    contextMenu.Items.Add("Clear", Nothing, Sub() ClearTexturePanel(imagePanel, name))
+    contextMenu.Items.Add("View Full Size", Nothing, Sub() ViewTextureFullSize(imagePanel))
+    contextMenu.Items.Add("Export...", Nothing, Sub() ExportTexture(imagePanel, name))
+    
+    imagePanel.ContextMenuStrip = contextMenu
+    
+    container.Controls.Add(imagePanel)
+    container.Controls.Add(label)
+    
+    Return container
+End Function
+
+Private Sub DrawTextured3DPreview(sender As Object, e As PaintEventArgs)
+    Dim panel = CType(sender, Panel)
+    Dim g = e.Graphics
+    g.SmoothingMode = SmoothingMode.AntiAlias
+    g.Clear(Color.FromArgb(30, 30, 30))
+    
+    If currentMaterial Is Nothing Then Return
+    
+    Dim zoom = If(panel.Tag IsNot Nothing, CSng(panel.Tag), 1.0F)
+    Dim center = New PointF(panel.Width / 2.0F, panel.Height / 2.0F)
+    Dim size = Math.Min(panel.Width, panel.Height) * 0.4F * zoom
+    
+    ' Load textures if available
+    Dim diffuseImage As Image = Nothing
+    If Not String.IsNullOrEmpty(currentMaterial.DiffuseTexture) AndAlso File.Exists(currentMaterial.DiffuseTexture) Then
+        diffuseImage = GetCachedTexture(currentMaterial.DiffuseTexture)
+    End If
+    
+    Select Case previewMode
+        Case "Sphere"
+            DrawTexturedSphere(g, center, size, diffuseImage)
+        Case "Cube"
+            DrawTexturedCube(g, center, size, diffuseImage)
+        Case "Plane"
+            DrawTexturedPlane(g, center, size, diffuseImage)
+    End Select
+    
+    ' Draw info text
+    Using font As New Font("Arial", 9)
+        Dim info = $"Material: {currentMaterial.Name}"
+        If diffuseImage IsNot Nothing Then
+            info &= $" | Texture: {Path.GetFileName(currentMaterial.DiffuseTexture)}"
+        End If
+        g.DrawString(info, font, Brushes.White, 5, panel.Height - 20)
+    End Using
+End Sub
+
+Private Sub DrawTexturedSphere(g As Graphics, center As PointF, radius As Single, texture As Image)
+    Using path As New GraphicsPath()
+        path.AddEllipse(center.X - radius, center.Y - radius, radius * 2, radius * 2)
+        
+        If texture IsNot Nothing Then
+            ' Create textured brush
+            Using textureBrush As New TextureBrush(texture, WrapMode.Clamp)
+                ' Apply spherical distortion
+                Dim matrix As New Matrix()
+                matrix.Translate(center.X - radius, center.Y - radius)
+                matrix.Scale(radius * 2 / texture.Width, radius * 2 / texture.Height)
+                matrix.RotateAt(rotationAngle * 180 / Math.PI, New PointF(center.X, center.Y))
+                textureBrush.Transform = matrix
+                
+                ' Create clipping region
+                Dim oldClip = g.Clip
+                g.SetClip(path)
+                
+                ' Fill with texture
+                g.FillEllipse(textureBrush, center.X - radius, center.Y - radius, radius * 2, radius * 2)
+                
+                ' Apply lighting if enabled
+                If lightingEnabled Then
+                    Using lightBrush As New PathGradientBrush(path)
+                        lightBrush.CenterColor = Color.FromArgb(0, Color.White)
+                        lightBrush.SurroundColors = {Color.FromArgb(128, Color.Black)}
+                        lightBrush.FocusScales = New PointF(0.3F, 0.3F)
+                        lightBrush.CenterPoint = New PointF(center.X - radius * 0.3F, center.Y - radius * 0.3F)
+                        g.FillPath(lightBrush, path)
+                    End Using
+                End If
+                
+                g.Clip = oldClip
+            End Using
+        Else
+            ' Fallback to material colors
+            DrawPreviewSphere(g, Point.Round(center), CInt(radius))
+        End If
+        
+        ' Draw outline
+        Using pen As New Pen(Color.FromArgb(100, Color.White), 1)
+            g.DrawPath(pen, path)
+        End Using
+    End Using
+End Sub
+
+Private Sub DrawTexturedCube(g As Graphics, center As PointF, size As Single, texture As Image)
+    ' Calculate cube vertices with rotation
+    Dim halfSize = size / 2
+    Dim vertices = GetCubeVertices(center, halfSize, rotationAngle)
+    
+    ' Draw faces (back to front for proper ordering)
+    Dim faces = GetCubeFaces(vertices)
+    
+    For Each face In faces.OrderBy(Function(f) f.AverageZ)
+        Using path As New GraphicsPath()
+            path.AddPolygon(face.Points)
+            
+            If texture IsNot Nothing AndAlso face.Visible Then
+                Using textureBrush As New TextureBrush(texture, WrapMode.Tile)
+                    ' Apply perspective transformation
+                    Dim bounds = path.GetBounds()
+                    Dim matrix As New Matrix()
+                    matrix.Scale(bounds.Width / texture.Width, bounds.Height / texture.Height)
+                    matrix.Translate(bounds.X, bounds.Y)
+                    textureBrush.Transform = matrix
+                    
+                    g.FillPath(textureBrush, path)
+                End Using
+            Else
+                ' Use material color with shading based on face normal
+                Dim brightness = 0.5F + 0.5F * face.Normal
+                Dim faceColor = Color.FromArgb(
+                    CInt(currentMaterial.DiffuseColor.R * brightness),
+                    CInt(currentMaterial.DiffuseColor.G * brightness),
+                    CInt(currentMaterial.DiffuseColor.B * brightness)
+                )
+                Using brush As New SolidBrush(faceColor)
+                    g.FillPath(brush, path)
+                End Using
+            End If
+            
+            ' Draw edges
+            Using pen As New Pen(Color.FromArgb(50, Color.White), 1)
+                g.DrawPath(pen, path)
+            End Using
+        End Using
+    Next
+End Sub
+
+Private Sub DrawTexturedPlane(g As Graphics, center As PointF, size As Single, texture As Image)
+    ' Create a simple quad
+    Dim halfSize = size / 2
+    Dim angle = rotationAngle
+    
+    ' Calculate rotated corners
+    Dim corners() As PointF = {
+        RotatePoint(New PointF(center.X - halfSize, center.Y - halfSize), center, angle),
+        RotatePoint(New PointF(center.X + halfSize, center.Y - halfSize), center, angle),
+        RotatePoint(New PointF(center.X + halfSize, center.Y + halfSize), center, angle),
+        RotatePoint(New PointF(center.X - halfSize, center.Y + halfSize), center, angle)
+    }
+    
+    Using path As New GraphicsPath()
+        path.AddPolygon(corners)
+        
+        If texture IsNot Nothing Then
+            ' Create texture brush with proper scaling
+            Using textureBrush As New TextureBrush(texture, WrapMode.Tile)
+                Dim bounds = path.GetBounds()
+                Dim matrix As New Matrix()
+                matrix.Scale(size / texture.Width, size / texture.Height)
+                matrix.RotateAt(angle * 180 / Math.PI, center)
+                matrix.Translate(center.X - halfSize, center.Y - halfSize)
+                textureBrush.Transform = matrix
+                
+                g.FillPath(textureBrush, path)
+            End Using
+        Else
+            Using brush As New SolidBrush(currentMaterial.DiffuseColor)
+                g.FillPath(brush, path)
+            End Using
+        End If
+        
+        ' Draw border
+        Using pen As New Pen(Color.White, 2)
+            g.DrawPath(pen, path)
+        End Using
+        
+        ' Draw UV coordinates at corners (optional)
+        If texture IsNot Nothing Then
+            Using font As New Font("Arial", 8)
+                g.DrawString("(0,0)", font, Brushes.Yellow, corners(0))
+                g.DrawString("(1,0)", font, Brushes.Yellow, corners(1))
+                g.DrawString("(1,1)", font, Brushes.Yellow, corners(2))
+                g.DrawString("(0,1)", font, Brushes.Yellow, corners(3))
+            End Using
+        End If
+    End Using
+End Sub
+
+' Helper methods
+Private Function GetCachedTexture(path As String) As Image
+    If Not textureCache.ContainsKey(path) Then
+        Try
+            Dim img = Image.FromFile(path)
+            ' Resize if too large to improve performance
+            If img.Width > 1024 OrElse img.Height > 1024 Then
+                Dim scale = Math.Min(1024.0F / img.Width, 1024.0F / img.Height)
+                Dim newSize = New Size(CInt(img.Width * scale), CInt(img.Height * scale))
+                Dim resized As New Bitmap(newSize.Width, newSize.Height)
+                Using g = Graphics.FromImage(resized)
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic
+                    g.DrawImage(img, 0, 0, newSize.Width, newSize.Height)
+                End Using
+                img.Dispose()
+                img = resized
+            End If
+            textureCache(path) = img
+        Catch ex As Exception
+            Return Nothing
+        End Try
+    End If
+    Return textureCache(path)
+End Function
+
+Private Function IsImageFile(path As String) As Boolean
+    Dim extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tga", ".dds", ".tif", ".tiff"}
+    Return extensions.Contains(IO.Path.GetExtension(path).ToLower())
+End Function
+
+Private Sub LoadTextureToPanel(panel As Panel, texturePath As String, textureType As String)
+    Try
+        Dim img = GetCachedTexture(texturePath)
+        If img IsNot Nothing Then
+            panel.BackgroundImage?.Dispose()
+            panel.BackgroundImage = New Bitmap(img)
+            
+            ' Hide drop label
+            If panel.Controls.Count > 0 Then
+                panel.Controls(0).Visible = False
+            End If
+            
+            ' Update material
+            If currentMaterial IsNot Nothing Then
+                Select Case textureType
+                    Case "Diffuse"
+                        currentMaterial.DiffuseTexture = texturePath
+                    Case "Normal"
+                        currentMaterial.NormalTexture = texturePath
+                    Case "Specular"
+                        currentMaterial.SpecularTexture = texturePath
+                End Select
+            End If
+            
+            ' Update main preview
+            previewPanel.Invalidate()
+        End If
+    Catch ex As Exception
+        MessageBox.Show($"Error loading texture: {ex.Message}", "Texture Error", 
+                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+    End Try
+End Sub
+
+Private Sub BrowseTextureForPanel(panel As Panel, textureType As String)
+    Using openDialog As New OpenFileDialog()
+        openDialog.Filter = "Image Files|*.jpg;*.jpeg;*.png;*.bmp;*.tga;*.dds;*.tif;*.tiff|All Files|*.*"
+        openDialog.Title = $"Select {textureType} Texture"
+        
+        If openDialog.ShowDialog() = DialogResult.OK Then
+            LoadTextureToPanel(panel, openDialog.FileName, textureType)
+        End If
+    End Using
+End Sub
+
+Private Sub ClearTexturePanel(panel As Panel, textureType As String)
+    panel.BackgroundImage?.Dispose()
+    panel.BackgroundImage = Nothing
+    
+    ' Show drop label
+    If panel.Controls.Count > 0 Then
+        panel.Controls(0).Visible = True
+    End If
+    
+    ' Update material
+    If currentMaterial IsNot Nothing Then
+        Select Case textureType
+            Case "Diffuse"
+                currentMaterial.DiffuseTexture = Nothing
+            Case "Normal"
+                currentMaterial.NormalTexture = Nothing
+            Case "Specular"
+                currentMaterial.SpecularTexture = Nothing
+        End Select
+    End If
+    
+    previewPanel.Invalidate()
+End Sub
+
+Private Sub ViewTextureFullSize(panel As Panel)
+    If panel.BackgroundImage IsNot Nothing Then
+        Using viewer As New Form()
+            viewer.Text = "Texture Viewer"
+            viewer.Size = New Size(800, 600)
+            viewer.StartPosition = FormStartPosition.CenterScreen
+            
+            Dim picBox As New PictureBox With {
+                .Dock = DockStyle.Fill,
+                .Image = panel.BackgroundImage,
+                .SizeMode = PictureBoxSizeMode.Zoom,
+                .BackColor = Color.Black
+            }
+            
+            viewer.Controls.Add(picBox)
+            viewer.ShowDialog()
+        End Using
+    End If
+End Sub
+
+Private Sub ExportTexture(panel As Panel, textureType As String)
+    If panel.BackgroundImage IsNot Nothing Then
+        Using saveDialog As New SaveFileDialog()
+            saveDialog.Filter = "PNG Image|*.png|JPEG Image|*.jpg|Bitmap Image|*.bmp"
+            saveDialog.FileName = $"{currentMaterial?.Name}_{textureType}"
+            
+            If saveDialog.ShowDialog() = DialogResult.OK Then
+                Select Case Path.GetExtension(saveDialog.FileName).ToLower()
+                    Case ".png"
+                        panel.BackgroundImage.Save(saveDialog.FileName, ImageFormat.Png)
+                    Case ".jpg", ".jpeg"
+                        panel.BackgroundImage.Save(saveDialog.FileName, ImageFormat.Jpeg)
+                    Case ".bmp"
+                        panel.BackgroundImage.Save(saveDialog.FileName, ImageFormat.Bmp)
+                End Select
+                
+                MessageBox.Show("Texture exported successfully.", "Export", 
+                              MessageBoxButtons.OK, MessageBoxIcon.Information)
+            End If
+        End Using
+    End If
+End Sub
+
+Private Function RotatePoint(point As PointF, center As PointF, angle As Single) As PointF
+    Dim cos = Math.Cos(angle)
+    Dim sin = Math.Sin(angle)
+    Dim dx = point.X - center.X
+    Dim dy = point.Y - center.Y
+    
+    Return New PointF(
+        CSng(center.X + dx * cos - dy * sin),
+        CSng(center.Y + dx * sin + dy * cos)
+    )
+End Function
+
+' Cube helper structures
+Private Structure CubeFace
+    Public Points() As PointF
+    Public AverageZ As Single
+    Public Normal As Single
+    Public Visible As Boolean
+End Structure
+
+Private Function GetCubeVertices(center As PointF, halfSize As Single, angle As Single) As PointF()
+    ' Define 8 vertices of a cube
+    Dim vertices(7) As PointF
+    Dim positions = {
+        New PointF(-1, -1), New PointF(1, -1), New PointF(1, 1), New PointF(-1, 1),  ' Front
+        New PointF(-1, -1), New PointF(1, -1), New PointF(1, 1), New PointF(-1, 1)   ' Back
+    }
+    
+    For i = 0 To 7
+        Dim x = positions(i Mod 4).X * halfSize
+        Dim y = positions(i Mod 4).Y * halfSize
+        Dim z = If(i < 4, halfSize, -halfSize)
+        
+        ' Apply rotation
+        Dim rotX = x * Math.Cos(angle) - z * Math.Sin(angle)
+        Dim rotZ = x * Math.Sin(angle) + z * Math.Cos(angle)
+        
+        ' Simple perspective projection
+        Dim perspective = 1.0F / (1.0F + rotZ * 0.001F)
+        vertices(i) = New PointF(
+            center.X + CSng(rotX * perspective),
+            center.Y + CSng(y * perspective)
+        )
+    Next
+    
+    Return vertices
+End Function
+
+Private Function GetCubeFaces(vertices() As PointF) As List(Of CubeFace)
+    Dim faces As New List(Of CubeFace)
+    
+    ' Define face indices
+    Dim faceIndices = {
+        {0, 1, 2, 3}, ' Front
+        {5, 4, 7, 6}, ' Back
+        {4, 0, 3, 7}, ' Left
+        {1, 5, 6, 2}, ' Right
+        {3, 2, 6, 7}, ' Top
+        {4, 5, 1, 0}  ' Bottom
+    }
+    
+    For i = 0 To 5
+        Dim face As New CubeFace
+        face.Points = {
+            vertices(faceIndices(i, 0)),
+            vertices(faceIndices(i, 1)),
+            vertices(faceIndices(i, 2)),
+            vertices(faceIndices(i, 3))
+        }
+        
+        ' Calculate average Z for sorting
+        face.AverageZ = (face.Points(0).Y + face.Points(1).Y + face.Points(2).Y + face.Points(3).Y) / 4
+        
+        ' Simple face normal calculation
+        face.Normal = If(i < 2, 0.5F + i * 0.3F, 0.7F)
+        face.Visible = True
+        
+        faces.Add(face)
+    Next
+    
+    Return faces
+End Function
+
+' Clean up textures when disposing
+Protected Overrides Sub Dispose(disposing As Boolean)
+    If disposing Then
+        ' Dispose cached textures
+        For Each kvp In textureCache
+            kvp.Value?.Dispose()
+        Next
+        textureCache.Clear()
+    End If
+    MyBase.Dispose(disposing)
+End Sub
+
+' Add this method to load existing materials with their textures
+Public Sub LoadExistingMaterials(existingMaterials As Dictionary(Of String, Material))
+    materials.Clear()
+    materialListBox.Items.Clear()
+    
+    For Each kvp In existingMaterials
+        materials.Add(kvp.Key, kvp.Value.Clone())
+        materialListBox.Items.Add(kvp.Key)
+    Next
+    
+    If materialListBox.Items.Count > 0 Then
+        materialListBox.SelectedIndex = 0
+    End If
+End Sub
+
+' Update the existing UpdateTexturePreview method
+Private Sub UpdateTexturePreview(panel As Panel, imagePath As String)
+    Try
+        panel.BackgroundImage?.Dispose()
+        If Not String.IsNullOrEmpty(imagePath) AndAlso File.Exists(imagePath) Then
+            panel.BackgroundImage = GetCachedTexture(imagePath)
+            
+            ' Hide drop label if it exists
+            If panel.Controls.Count > 0 Then
+                panel.Controls(0).Visible = False
+            End If
+        Else
+            ' Show drop label if it exists
+            If panel.Controls.Count > 0 Then
+                panel.Controls(0).Visible = True
+            End If
+        End If
+    Catch ex As Exception
+        MessageBox.Show($"Error loading texture: {ex.Message}", "Texture Error", 
+                      MessageBoxButtons.OK, MessageBoxIcon.Warning)
+    End Try
+End Sub

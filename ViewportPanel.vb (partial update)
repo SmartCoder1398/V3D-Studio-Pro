@@ -1,0 +1,53 @@
+' Update RenderObject method to use materials
+Private Sub RenderObject(obj As Object3D, viewMatrix As Matrix, projectionMatrix As Matrix)
+    ' Get object mesh
+    Dim mesh = MeshGenerator.GetMesh(obj.Type, device)
+    If mesh Is Nothing Then Return
+    
+    ' Get material
+    Dim material As Material = Nothing
+    If Form1.materialLibrary IsNot Nothing AndAlso Form1.materialLibrary.ContainsKey(obj.MaterialName) Then
+        material = Form1.materialLibrary(obj.MaterialName)
+    End If
+    
+    ' Set vertex buffer
+    deviceContext.InputAssembler.SetVertexBuffers(0, New D3D11.VertexBufferBinding(
+        mesh.VertexBuffer, Marshal.SizeOf(GetType(VertexData)), 0))
+    deviceContext.InputAssembler.SetIndexBuffer(mesh.IndexBuffer, Format.R32_UInt, 0)
+    
+    ' Create world matrix
+    Dim worldMatrix = Matrix.Scaling(obj.Scale.X, obj.Scale.Y, obj.Scale.Z) *
+                     Matrix.RotationYawPitchRoll(obj.Rotation.Y, obj.Rotation.X, obj.Rotation.Z) *
+                     Matrix.Translation(obj.Position.X, obj.Position.Y, obj.Position.Z)
+    
+    ' Update constant buffer with material colors
+    Dim cbData As New ConstantBufferData() With {
+        .World = worldMatrix,
+        .View = viewMatrix,
+        .Projection = projectionMatrix
+    }
+    
+    If material IsNot Nothing Then
+        ' Use material colors
+        cbData.Color = New Vector4(
+            material.DiffuseColor.R / 255.0F,
+            material.DiffuseColor.G / 255.0F,
+            material.DiffuseColor.B / 255.0F,
+            material.Opacity
+        )
+    Else
+        ' Use default color or selection color
+        cbData.Color = If(obj.IsSelected, New Vector4(1, 1, 0, 1), New Vector4(0.8F, 0.8F, 0.8F, 1))
+    End If
+    
+    deviceContext.UpdateSubresource(cbData, constantBuffer)
+    
+    ' Set to triangle list for solid objects
+    deviceContext.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList
+    
+    ' Draw
+    deviceContext.DrawIndexed(mesh.IndexCount, 0, 0)
+    
+    ' Reset to line list
+    deviceContext.InputAssembler.PrimitiveTopology = PrimitiveTopology.LineList
+End Sub
